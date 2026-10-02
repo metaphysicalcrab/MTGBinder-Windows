@@ -27,5 +27,19 @@ export const OCR_BINARY = path.join(ROOT_DIR, 'bin', 'ocr')
 export const BENCH_DIR = path.join(DATA_DIR, 'bench')
 /** Holds ANTHROPIC_API_KEY, written by the Settings page (spec §3.1). */
 export const ENV_PATH = path.join(ROOT_DIR, '.env')
-/** Binder.app's library (spec §3.4); `pnpm move-library` copies data/ there. */
-export const APP_LIBRARY_DIR = path.join(os.homedir(), 'Library', 'Application Support', 'Binder')
+/**
+ * The desktop app's library (spec §3.4), named here for everything that needs it: the app, `pnpm move-library` (which
+ * copies data/ there), `pnpm app`, and `pnpm start`'s note. On a Mac `~/Library/Application Support/Binder`; on
+ * Windows `%LOCALAPPDATA%\Binder` (Local, not Roaming: the library is large and belongs to this PC; and not Documents,
+ * which OneDrive syncs); elsewhere `$XDG_DATA_HOME/Binder` (`~/.local/share/Binder`).
+ */
+export function appLibraryDir(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  home = os.homedir(),
+): string {
+  if (platform === 'win32') return path.win32.join(env.LOCALAPPDATA || path.win32.join(home, 'AppData', 'Local'), 'Binder')
+  if (platform === 'darwin') return path.posix.join(home, 'Library', 'Application Support', 'Binder')
+  return path.posix.join(env.XDG_DATA_HOME || path.posix.join(home, '.local', 'share'), 'Binder')
+}
+export const APP_LIBRARY_DIR = appLibraryDir()

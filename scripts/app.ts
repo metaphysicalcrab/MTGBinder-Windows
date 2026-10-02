@@ -1,40 +1,48 @@
-// `pnpm app`: builds Binder.app (its icons, the web app, the OCR helper, then electron-builder) and puts it in
-// /Applications, replacing the one there. `pnpm app --no-install` leaves it in release/, where the check runs it.
+// `pnpm app`: builds the desktop app (its icons, the web app, then the platform's own: the Mac's OCR helper and
+// Binder.app; Windows' installer) and installs it, replacing the one there: Binder.app in /Applications, refused while
+// it runs; on Windows, with its installer, run silently once a running Binder has quit. `pnpm app --no-install` leaves
+// it in release/ (Binder.app, or win-unpacked\Binder.exe), where the check runs it. Each step that fails says so in
+// one line.
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
-import path from 'node:path'
-import { APP_LIBRARY_DIR, DB_PATH, libraryPaths, OCR_BINARY, OCR_SOURCE, ROOT_DIR } from '../src/server/config.ts'
-import { buildOcrHelper } from '../src/server/scanner/ocr-client.ts'
-import { appRunning, builtApp, installApp } from './lib/install.ts'
+import { build as viteBuild } from 'vite'
+import { APP_LIBRARY_DIR, DB_PATH, libraryPaths, ROOT_DIR } from '../src/server/config.ts'
+import { firstLine, step } from './lib/build.ts'
+import { desktopApp } from './lib/install.ts'
 
-const APPLICATIONS = '/Applications'
-const installed = path.join(APPLICATIONS, 'Binder.app')
 const install = !process.argv.includes('--no-install')
-const quitFirst = 'Binder is running: quit it (Cmd+Q, or Quit Binder in its menu-bar icon), then run pnpm app again.'
-const run = (command: string, args: string[]) => execFileSync(command, args, { cwd: ROOT_DIR, stdio: 'inherit' })
-
-if (install && appRunning(installed)) {
-  console.error(quitFirst)
+const desktop = desktopApp()
+if (!desktop) {
+  console.error('pnpm app builds the desktop app on a Mac or a Windows PC; here, pnpm app:dev runs it from the project.')
   process.exit(1)
 }
-console.log('Drawing the icons…')
-run('swift', ['scripts/make-icons.swift', 'build/icons'])
-console.log('Building the web app…')
-run('pnpm', ['exec', 'vite', 'build'])
-if (await buildOcrHelper(OCR_SOURCE, OCR_BINARY)) console.log('Built the OCR helper.')
-console.log('Packaging Binder.app…')
-run('pnpm', ['exec', 'electron-builder', '--mac'])
-const built = builtApp(path.join(ROOT_DIR, 'release'))
-if (!install) {
-  console.log(`Built ${built}`)
-} else if (appRunning(installed)) {
-  console.error(quitFirst)
-  process.exitCode = 1
-} else {
-  console.log(`Installed ${installApp(built, APPLICATIONS)}. Open Binder from Spotlight, Launchpad, or Applications.`)
-  // The first install: Binder.app opened before the move starts a library of its own, which a scan or a card added
-  // there keeps from being replaced by the move.
-  if (!fs.existsSync(libraryPaths(APP_LIBRARY_DIR).dbPath) && fs.existsSync(DB_PATH)) {
-    console.log('Before opening it the first time, run pnpm move-library to bring your library over.')
+const blocked = install ? desktop.blocked() : null
+if (blocked) {
+  console.error(blocked)
+  process.exit(1)
+}
+// vite.config.ts and electron-builder read the project from the working folder, as `pnpm exec` ran them.
+process.chdir(ROOT_DIR)
+try {
+  console.log('Drawing the icons…')
+  // make-icons.ts in this Node, which runs TypeScript as it is (on a Mac it runs make-icons.swift too).
+  await step("Couldn't draw the icons", () =>
+    execFileSync(process.execPath, ['scripts/make-icons.ts', 'build/icons'], { stdio: 'inherit' }),
+  )
+  console.log('Building the web app…')
+  await step("Couldn't build the web app", () => viteBuild())
+  const built = await desktop.package(install)
+  if (!install) {
+    console.log(`Built ${built}`)
+  } else {
+    console.log(await desktop.install(built))
+    // The first install: the app opened before the move starts a library of its own, which a scan or a card added
+    // there keeps from being replaced by the move.
+    if (!fs.existsSync(libraryPaths(APP_LIBRARY_DIR).dbPath) && fs.existsSync(DB_PATH)) {
+      console.log('Before opening it the first time, run pnpm move-library to bring your library over.')
+    }
   }
+} catch (err) {
+  console.error(firstLine(err))
+  process.exitCode = 1
 }

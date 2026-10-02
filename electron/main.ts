@@ -1,15 +1,19 @@
-// Binder.app (spec §3.4): one window onto Binder's pages, a menu-bar icon, and Binder's server in its own process.
-// Closing the window keeps Binder running (scans finish, card data refreshes); Quit (Cmd+Q, or the menu-bar icon's
-// menu) stops everything. Entry point: package.json "main".
+// The desktop app (spec §3.4): one window onto Binder's pages, an icon in the Mac's menu bar or Windows' notification
+// area, and Binder's server in its own process. Closing the window keeps Binder running (scans finish, card data
+// refreshes); Quit (Cmd+Q on a Mac, Ctrl+Q on Windows, or the icon's menu) stops everything, and so does opening Binder
+// again with --quit (`Binder.exe --quit`), which `pnpm app` uses before installing. Entry point: package.json "main".
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import {
   app,
+  BaseWindow,
   BrowserWindow,
   dialog,
   Menu,
   type MenuItemConstructorOptions,
   nativeImage,
+  nativeTheme,
   session,
   shell,
   systemPreferences,
@@ -18,21 +22,41 @@ import {
   utilityProcess,
 } from 'electron'
 import { externalUrl, isAppUrl, permissionAllowed } from './links.ts'
+import { rotateLog } from './log.ts'
 import { startingPage, startupFailure } from './messages.ts'
-import { type AppPaths, appPaths } from './paths.ts'
+import { type AppPaths, appPaths, PATHS_VARIABLE } from './paths.ts'
+import {
+  APP_USER_MODEL_ID,
+  cameraDecision,
+  menuTemplate,
+  quitRequested,
+  trayClickOpensWindow,
+  trayIcon,
+  windowIcon,
+} from './platform.ts'
 import type { ServerMessage } from './server.ts'
 
 app.setName('Binder')
+// Before any window or tray icon: Windows groups them, the taskbar button and the Start menu shortcut by this ID. The
+// installer's when packaged; run from the project, Electron's own path, so it isn't taken for the installed app.
+if (process.platform === 'win32') app.setAppUserModelId(app.isPackaged ? APP_USER_MODEL_ID : process.execPath)
 
 let paths: AppPaths
 try {
-  paths = appPaths({ appData: app.getPath('appData'), appRoot: app.getAppPath(), packaged: app.isPackaged, env: process.env })
+  paths = appPaths({
+    platform: process.platform,
+    env: process.env,
+    home: os.homedir(),
+    appRoot: app.getAppPath(),
+    packaged: app.isPackaged,
+  })
 } catch (err) {
   dialog.showErrorBox("Binder couldn't start", err instanceof Error ? err.message : String(err))
   app.exit(1)
   throw err
 }
-// The window's own files (storage, caches) go beside the library, not in it. Before anything reads userData.
+// The window's own files (storage, caches) go beside the library, not in it. Before anything reads userData (the
+// single-instance lock is kept there too).
 fs.mkdirSync(paths.electronDir, { recursive: true })
 app.setPath('userData', paths.electronDir)
 
@@ -42,6 +66,8 @@ let appUrl: string | null = null
 let status = 'Starting…'
 let window: BrowserWindow | null = null
 let tray: Tray | null = null
+/** Windows: the hidden window that hears the session end (stopWithWindows). */
+let sessionListener: BaseWindow | null = null
 let quitting = false
 /**
  * The server's log for this run. It's never ended: the server's output can still arrive after its process exits, and
@@ -53,11 +79,14 @@ let log: fs.WriteStream | null = null
 const logFile = () => path.join(paths.logDir, 'binder.log')
 
 function openLog(): fs.WriteStream {
-  fs.mkdirSync(paths.logDir, { recursive: true })
-  const file = logFile()
-  if (fs.existsSync(file)) fs.renameSync(file, path.join(paths.logDir, 'binder.previous.log'))
-  // Appending (to a file new after the rename), so the stream's writes land after appLog's rather than over them.
-  const stream = fs.createWriteStream(file, { flags: 'a' })
+  try {
+    fs.mkdirSync(paths.logDir, { recursive: true })
+    rotateLog(logFile(), path.join(paths.logDir, 'binder.previous.log'))
+  } catch {
+    // No folder for it: the stream below fails quietly, and Binder runs without a log.
+  }
+  // Appending (to a file new after the rotation), so the stream's writes land after appLog's rather than over them.
+  const stream = fs.createWriteStream(logFile(), { flags: 'a' })
   // The log is best-effort: a write that fails (a full disk, say) must never throw in the main process.
   stream.on('error', () => {})
   return stream
@@ -94,6 +123,7 @@ function showWindow(): void {
     window.focus()
     return
   }
+  const icon = windowIcon(process.platform, app.getAppPath())
   const win = new BrowserWindow({
     width: 1320,
     height: 900,
@@ -102,6 +132,9 @@ function showWindow(): void {
     title: 'Binder',
     backgroundColor: '#0c0a09',
     show: false,
+    // Windows: the menu bar shows with Alt, rather than as a white strip above the dark page.
+    ...(process.platform === 'win32' ? { autoHideMenuBar: true } : {}),
+    ...(icon ? { icon } : {}),
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false },
   })
   window = win
@@ -109,6 +142,7 @@ function showWindow(): void {
   // Closing the window keeps Binder running; the page (and its camera) goes with the window.
   win.on('closed', () => {
     if (window === win) window = null
+    if (!quitting) sayStillRunning()
   })
   // Web links open in the browser; Binder's own pages stay in the window.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -123,6 +157,26 @@ function showWindow(): void {
     if (external) void shell.openExternal(external)
   })
   load(win, appUrl ?? startingPage(status))
+}
+
+/**
+ * Windows, the first time the window is closed: says Binder is still running, and where its icon is. Windows 11 tucks
+ * a new tray icon away under the notification area's arrow, so without this Binder seems gone while it still keeps the
+ * library open. Once: a file in the window's own folder remembers it was said.
+ */
+function sayStillRunning(): void {
+  if (process.platform !== 'win32' || !tray) return
+  const said = path.join(paths.electronDir, 'still-running-said')
+  try {
+    if (fs.existsSync(said)) return
+    fs.writeFileSync(said, '')
+  } catch {
+    return
+  }
+  tray.displayBalloon({
+    title: 'Binder is still running',
+    content: 'To open it, click its icon in the notification area. To quit, right-click the icon → Quit Binder.',
+  })
 }
 
 /** Says what Binder is doing in a window still waiting for it to start. */
@@ -142,9 +196,10 @@ function fail(message: string): void {
 
 function startServer(): void {
   log = openLog()
-  const child = utilityProcess.fork(path.join(import.meta.dirname, 'server.ts'), [JSON.stringify(paths)], {
+  const child = utilityProcess.fork(path.join(import.meta.dirname, 'server.ts'), [], {
     serviceName: 'Binder server',
     stdio: 'pipe',
+    env: { ...process.env, [PATHS_VARIABLE]: JSON.stringify(paths) },
   })
   server = child
   child.stdout?.on('data', (chunk: Buffer) => log?.write(chunk))
@@ -170,66 +225,112 @@ function startServer(): void {
 }
 
 /**
- * Binder's own pages get the camera (the Scan page, with the Mac's permission, asked for once) and clipboard writes
- * (the Copy buttons); nothing else, and no other page.
+ * Binder's own pages get the camera (the Scan page: with the Mac's permission, asked for once; on Windows, unless its
+ * camera privacy switch is off) and clipboard writes (the Copy buttons); nothing else, and no other page.
  */
 function allowPermissions(): void {
-  // Chromium's fake camera (the end-to-end check's) isn't the Mac's: there's nothing to ask macOS for.
+  // Chromium's fake camera (the end-to-end check's) isn't the computer's: there's nothing to ask for.
   const fakeCamera = app.commandLine.hasSwitch('use-fake-device-for-media-stream')
   session.defaultSession.setPermissionCheckHandler((_contents, permission, origin) => permissionAllowed(permission, origin, appUrl))
   session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
-    const mediaTypes = 'mediaTypes' in details ? (details.mediaTypes ?? []) : []
-    if (!permissionAllowed(permission, details.requestingUrl ?? contents.getURL(), appUrl, mediaTypes)) return callback(false)
-    const video = permission === 'media' && mediaTypes.includes('video')
-    if (!video || fakeCamera) return callback(true)
-    void systemPreferences.askForMediaAccess('camera').then(callback, () => callback(false))
+    // Every request is answered, once: one left unanswered would leave the page's camera waiting for good.
+    let answered = false
+    const answer = (allowed: boolean) => {
+      if (answered) return
+      answered = true
+      callback(allowed)
+    }
+    try {
+      const mediaTypes = 'mediaTypes' in details ? (details.mediaTypes ?? []) : []
+      if (!permissionAllowed(permission, details.requestingUrl ?? contents.getURL(), appUrl, mediaTypes)) return answer(false)
+      const video = permission === 'media' && mediaTypes.includes('video')
+      if (!video || fakeCamera) return answer(true)
+      const decision = cameraDecision(process.platform, () => systemPreferences.getMediaAccessStatus('camera'))
+      if (decision !== 'ask') return answer(decision)
+      void systemPreferences.askForMediaAccess('camera').then(answer, () => answer(false))
+    } catch {
+      answer(false)
+    }
   })
 }
 
-function buildMenus(): void {
-  const template: MenuItemConstructorOptions[] = [
-    { role: 'appMenu' },
-    // Close Window (Cmd+W): the window closes, Binder keeps running.
-    { role: 'fileMenu' },
-    { role: 'editMenu' },
-    {
-      label: 'View',
-      submenu: [
-        { role: 'reload' },
-        ...(app.isPackaged ? [] : [{ role: 'toggleDevTools' } as const]),
-        { type: 'separator' },
-        { role: 'resetZoom' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
-        { type: 'separator' },
-        { role: 'togglefullscreen' },
-      ],
-    },
-    { role: 'windowMenu' },
+/** The tray icon's menu. */
+function trayMenu(): MenuItemConstructorOptions[] {
+  return [
+    { label: 'Open Binder', click: showWindow },
+    { type: 'separator' },
+    { label: 'Quit Binder', click: () => app.quit() },
   ]
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
-  // Drawn by scripts/make-icons.swift (`pnpm icons`); the @2x file beside it is picked up on its own.
-  const icon = nativeImage.createFromPath(path.join(app.getAppPath(), 'build', 'icons', 'trayTemplate.png'))
-  icon.setTemplateImage(true)
-  tray = new Tray(icon)
-  tray.setToolTip('Binder')
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: 'Open Binder', click: showWindow },
-      { type: 'separator' },
-      { label: 'Quit Binder', click: () => app.quit() },
-    ]),
-  )
 }
 
-// One Binder at a time: opening it again brings its window forward.
-if (!app.requestSingleInstanceLock()) {
+function buildMenus(): void {
+  const menus = menuTemplate(process.platform, { packaged: app.isPackaged, quit: () => app.quit() })
+  Menu.setApplicationMenu(Menu.buildFromTemplate(menus))
+  // Drawn by `pnpm icons` (scripts/make-icons.ts) into build/icons.
+  const { file, template } = trayIcon(process.platform, app.getAppPath())
+  const icon = nativeImage.createFromPath(file)
+  if (icon.isEmpty()) appLog(`No tray icon at ${file}: run pnpm icons.`)
+  if (template) icon.setTemplateImage(true)
+  tray = new Tray(icon)
+  tray.setToolTip('Binder')
+  tray.setContextMenu(Menu.buildFromTemplate(trayMenu()))
+  // Windows and Linux: a click opens Binder, and the menu is a right-click away. A Mac's click shows the menu.
+  if (trayClickOpensWindow(process.platform)) tray.on('click', showWindow)
+}
+
+/**
+ * Windows: stops the server cleanly when Windows ends the session (shutting down, restarting, signing out), which
+ * doesn't quit apps the usual way. A hidden window hears it (Binder may have no window open); Windows ends Binder once
+ * the handler returns, so it waits there, up to 3 seconds, for the server to close the library. Best-effort: without
+ * it, the library's log is folded back in when it's next opened.
+ */
+function stopWithWindows(): void {
+  try {
+    sessionListener = new BaseWindow({ show: false, skipTaskbar: true })
+  } catch (err) {
+    appLog(`Couldn't listen for Windows ending the session: ${err instanceof Error ? err.message : String(err)}`)
+    return
+  }
+  sessionListener.on('session-end', () => {
+    if (quitting || !server) return
+    quitting = true
+    appLog('Windows is ending the session: stopping the server')
+    const { pid } = server
+    server.postMessage({ type: 'stop' })
+    const until = Date.now() + 3_000
+    while (pid !== undefined && running(pid) && Date.now() < until) blockFor(50)
+  })
+}
+
+/** Whether the process is still running. */
+function running(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Waits, holding the main process: only while Windows ends the session, when nothing else is left to do. */
+const blockFor = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+
+// One Binder at a time: opening it again brings its window forward, or with --quit, quits it. A second launch's
+// command line can come through changed (Chromium's), so --quit also travels in the lock's data.
+const quitAsked = quitRequested(process.argv)
+if (!app.requestSingleInstanceLock({ quit: quitAsked })) {
+  app.quit()
+} else if (quitAsked) {
+  // No Binder running to quit.
   app.quit()
 } else {
-  app.on('second-instance', showWindow)
-  // Clicking the Dock icon with the window closed opens it again.
+  app.on('second-instance', (_event, argv, _cwd, data) => {
+    if (quitRequested(argv, data)) app.quit()
+    else showWindow()
+  })
+  // Clicking the Dock icon with the window closed opens it again (a Mac's).
   app.on('activate', showWindow)
-  // Closing the window keeps Binder running (in the menu bar).
+  // Closing the window keeps Binder running (in the menu bar, or the notification area).
   app.on('window-all-closed', () => {})
   // Quitting stops the server first (it closes the library), for up to 5 seconds.
   app.on('before-quit', (event) => {
@@ -246,9 +347,17 @@ if (!app.requestSingleInstanceLock()) {
   })
   // No top-level await on whenReady: an ES module entry that awaits it never gets there.
   void app.whenReady().then(() => {
-    allowPermissions()
-    buildMenus()
-    startServer()
-    showWindow()
+    // Anything that throws here would leave Binder without a window, or on "Starting…" for good: it's said instead.
+    try {
+      // Windows draws the title bar dark, over the dark page, whatever its own light or dark setting.
+      if (process.platform !== 'darwin') nativeTheme.themeSource = 'dark'
+      allowPermissions()
+      buildMenus()
+      startServer()
+      showWindow()
+      if (process.platform === 'win32') stopWithWindows()
+    } catch (err) {
+      fail(err instanceof Error ? err.message : String(err))
+    }
   })
 }
