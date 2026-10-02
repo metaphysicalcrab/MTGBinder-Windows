@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { KEEP } from '../../../shared/playtest/game.ts'
 import type { Action, GameState } from '../../../shared/playtest/types.ts'
-import { boardKey } from '../../lib/playtest-board.ts'
+import { boardKey, CARD_RATIO } from '../../lib/playtest-board.ts'
 import type { SaveStatus } from '../../lib/playtest-save.ts'
 import { GO_TO_MS, isTypingTarget } from '../../lib/shortcuts.ts'
 import { CardView } from './CardView.tsx'
+import { useElementSize } from './Table.tsx'
 
 /**
  * An opening hand, by my playgroup's rule (spec §5.9.2): the seat choosing drew 10 and picks 3 to put on the bottom.
@@ -30,9 +31,14 @@ export function MulliganView({
   const need = Math.max(0, s.hand.length - KEEP)
   const left = need - marked.length
   const second = game.seats.length === 2 && seat !== game.startingSeat
+  // A card is 260 px tall, or, three to a row on a phone, as tall as a third of the row (less its gaps) allows.
+  const handRef = useRef<HTMLUListElement>(null)
+  const handWidth = useElementSize(handRef)?.width ?? Infinity
+  const height = Math.min(260, Math.floor(((handWidth - 16) / 3) * CARD_RATIO))
 
-  // ⌘Z reaches back through the mulligans too (spec §5.9.7), with the Board's guards: not while a field, a dialog, or
-  // a menu has the keys, nor right after `g`. Only undo does anything here. When `g` was last pressed; never, to start.
+  // The undo key (Cmd+Z on a Mac, Ctrl+Z elsewhere: undoKeyLabel) reaches back through the mulligans too (spec §5.9.7),
+  // with the Board's guards: not while a field, a dialog, or a menu has the keys, nor right after `g`. Only undo does
+  // anything here. When `g` was last pressed; never, to start.
   const lastG = useRef(-Infinity)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -54,7 +60,7 @@ export function MulliganView({
           Couldn't save — retrying
         </p>
       )}
-      <div className="flex items-start justify-between gap-6">
+      <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:gap-6">
         <div>
           <h1 className="font-serif text-3xl text-amber-400">{s.name}</h1>
           <p className="mt-1 text-stone-300">
@@ -75,7 +81,8 @@ export function MulliganView({
         )}
       </div>
 
-      <ul aria-label="Opening hand" className="flex flex-wrap gap-3">
+      {/* On a phone, three cards to a row, as large as fit; from sm up, as many 260 px cards as fit. */}
+      <ul ref={handRef} aria-label="Opening hand" className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:gap-3">
         {s.hand.map((id) => {
           const at = marked.indexOf(id)
           return (
@@ -89,7 +96,7 @@ export function MulliganView({
                 }}
                 className={`relative rounded-lg transition ${at >= 0 ? 'opacity-45 ring-2 ring-amber-500 ring-offset-2 ring-offset-stone-950' : 'hover:-translate-y-1'}`}
               >
-                <CardView data={game.data[id]!} height={260} />
+                <CardView data={game.data[id]!} height={height} />
                 {at >= 0 && (
                   <span className="absolute -top-2 -right-2 flex size-6 items-center justify-center rounded-full bg-amber-500 text-sm font-bold text-stone-950">
                     {at + 1}
@@ -101,7 +108,8 @@ export function MulliganView({
         })}
       </ul>
 
-      <div className="flex flex-wrap items-center gap-3">
+      {/* Below lg, where the hand runs past the window's bottom, Keep and Mulligan stay in view under it. */}
+      <div className="flex flex-wrap items-center gap-3 max-lg:sticky max-lg:bottom-0 max-lg:z-10 max-lg:-mx-3 max-lg:border-t max-lg:border-stone-800 max-lg:bg-stone-950/95 max-lg:px-3 max-lg:py-2">
         <button
           disabled={left !== 0}
           onClick={() => play({ type: 'keep', seat, bottom: marked })}

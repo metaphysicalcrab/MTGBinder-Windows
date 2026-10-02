@@ -2,31 +2,63 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { list } from '../../../shared/playtest/log.ts'
 import { canFlip, looseCards, visibleTo } from '../../../shared/playtest/status.ts'
 import type { Action, CardData, CardState, Dest, GameState, SavedGame, SeatIndex } from '../../../shared/playtest/types.ts'
+import { useBackToClose } from '../../lib/back-to-close.ts'
 import { useDecks } from '../../lib/decks.ts'
+import { useCoarsePointer } from '../../lib/platform.ts'
 import { useEndGame, useStartGame, type GameSession } from '../../lib/playtest.ts'
-import { asksCommandZone, boardKey, cardHeight, cardsInBox, counterChoices, fromScreen, menuCounters, playDest, steadyCardHeight, tapTo, tokenLabel } from '../../lib/playtest-board.ts'
+import {
+  asksCommandZone,
+  boardKey,
+  cardHeight,
+  cardsInBox,
+  counterChoices,
+  fromScreen,
+  holdOpensMenu,
+  isTouch,
+  LONG_PRESS_MS,
+  menuCounters,
+  movedFar,
+  playDest,
+  steadyCardHeight,
+  tapAction,
+  tapTo,
+  tokenLabel,
+  type Press,
+} from '../../lib/playtest-board.ts'
 import { GO_TO_MS, isTypingTarget } from '../../lib/shortcuts.ts'
-import { BoardContext, type BoardApi, type DragSource } from './board-context.ts'
+import { BoardContext, type BoardApi, type DragSource, type HoldTarget } from './board-context.ts'
 import { CardView } from './CardView.tsx'
 import { CommandZoneDialog, CountDialog, CounterDialog, EndGameDialog, LookDialog, SearchDialog, TokenDialog } from './dialogs.tsx'
 import { ContextMenu, type MenuItem, type MenuState } from './Menu.tsx'
-import { LogPanel, PilePanel, Preview } from './panels.tsx'
+import { CardViewer, LogPanel, PilePanel, Preview } from './panels.tsx'
 import { Battlefield, HandStrip, SideBlock, TurnBar, useElementSize } from './Table.tsx'
 
-/** A drag in progress: cards following the pointer, or a box being drawn to select cards. */
-type Drag =
-  | {
-      kind: 'cards'
-      ids: string[]
-      source: DragSource
-      start: { x: number; y: number }
-      at: { x: number; y: number }
-      /** Each card's center from the pointer, and its height, when the drag began. */
-      offsets: Record<string, { dx: number; dy: number; height: number }>
-      moved: boolean
-      shift: boolean
-    }
-  | { kind: 'box'; seat: SeatIndex; field: DOMRect; start: { x: number; y: number }; at: { x: number; y: number }; moved: boolean; shift: boolean }
+type Point = { x: number; y: number }
+
+/** Where a menu opens, and whether a finger's press opened it (a tap or a hold), not a right-click or a ⋯. */
+type MenuAt = Point & { byFinger: boolean }
+
+/**
+ * A press in progress, from the pointer going down (spec §5.9.4): cards that follow it once it moves, a box being drawn
+ * to select cards, or a finger held on a library or an ability on the stack, which does something only when held still.
+ * `pointer` is its pointer's id: a second finger on the table while one is down does nothing.
+ */
+type Drag = Press & { pointer: number; at: Point } & (
+    | {
+        kind: 'cards'
+        /** The card pressed; `ids` are the cards that move with it (the selection it's in). */
+        card: string
+        ids: string[]
+        source: DragSource
+        /** Each card's center from the pointer, and its height, when the drag began. */
+        offsets: Record<string, { dx: number; dy: number; height: number }>
+        shift: boolean
+        /** When it came down (performance.now()), for a double-tap (DOUBLE_TAP_MS). */
+        time: number
+      }
+    | { kind: 'box'; seat: SeatIndex; field: DOMRect; shift: boolean }
+    | { kind: 'hold'; target: HoldTarget }
+  )
 
 type Dialog =
   | { kind: 'count'; title: string; label: string; initial: number; max: number; onSubmit: (n: number) => void }
@@ -36,9 +68,6 @@ type Dialog =
   | { kind: 'token'; seat: SeatIndex }
   | { kind: 'commander'; ids: string[]; commanders: string[]; to: Dest }
   | { kind: 'end' }
-
-/** A pointer moved this far is a drag, not a click. */
-const DRAG_START_PX = 5
 
 const other = (seat: SeatIndex): SeatIndex => (seat === 0 ? 1 : 0)
 
@@ -64,6 +93,23 @@ function nameFor(game: GameState, id: string, viewer: SeatIndex): string {
   return card === undefined || visibleTo(card, viewer) ? game.data[id]!.name : 'A face-down card'
 }
 
+/**
+ * Where a menu opens, from the event that opens it, which does nothing else: at the pointer for a right-click, under
+ * the button for a click on one (a ⋯).
+ */
+function menuEvent(e: MouseEvent): MenuAt {
+  e.preventDefault()
+  e.stopPropagation()
+  if (e.type !== 'click') return { x: e.clientX, y: e.clientY, byFinger: false }
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  return { x: rect.left, y: rect.bottom + 4, byFinger: false }
+}
+
+/** A finger's menu for a card it can see: View card after the first item, as a finger has no hover to preview it. */
+function withView(items: MenuItem[], view: (() => void) | null): MenuItem[] {
+  return view === null ? items : [items[0]!, { label: 'View card', onSelect: view }, ...items.slice(1)]
+}
+
 /** The playtest's table (spec §5.9.3–§5.9.6): both halves, the hands, the turn bar, and everything the page opens. */
 export function Board({ saved, game, session }: { saved: SavedGame; game: GameState; session: GameSession }) {
   const { play, undo, canUndo, saveStatus } = session
@@ -80,6 +126,12 @@ export function Board({ saved, game, session }: { saved: SavedGame; game: GameSt
   const [pile, setPile] = useState<{ seat: SeatIndex; zone: 'graveyard' | 'exile' } | null>(null)
   const [logOpen, setLogOpen] = useState(false)
   const [attaching, setAttaching] = useState<string[] | null>(null)
+  // The main pointer is a finger (M13). It has no Shift: Select, in the turn bar, makes a tap add a card to the
+  // selection or take it out.
+  const coarse = useCoarsePointer()
+  const [selecting, setSelecting] = useState(false)
+  // The card shown large from its menu's View card (a finger has no hover), until a tap anywhere.
+  const [viewing, setViewing] = useState<string | null>(null)
   // The drag follows the pointer in its own layer, so the table doesn't re-render as it moves.
   const [dragStore] = useState(createDragStore)
   const [dragging, setDragging] = useState(false)
@@ -97,8 +149,13 @@ export function Board({ saved, game, session }: { saved: SavedGame; game: GameSt
   const selection = useMemo(() => new Set([...selected].filter((id) => game.cards[id]?.zone === 'battlefield')), [selected, game])
 
   // Handlers read the latest game and view through this, so they needn't change on every action.
-  const latest = useRef({ game, viewer, selection, attaching })
-  latest.current = { game, viewer, selection, attaching }
+  // (Select's mode only while its button shows: not once a mouse is the main pointer.)
+  const latest = useRef({ game, viewer, selection, attaching, selecting: coarse && selecting })
+  latest.current = { game, viewer, selection, attaching, selecting: coarse && selecting }
+
+  // The card viewed, while it's still one the seat viewed can see.
+  const viewingCard = viewing === null ? undefined : game.cards[viewing]
+  const viewed = viewingCard !== undefined && visibleTo(viewingCard, viewer) ? viewing : null
 
   // A card played, resolved, or moved from under the pointer takes its element with it, and no pointerleave follows:
   // once the card hovered has left the zone it was hovered in, or the game, nothing is hovered.
@@ -151,135 +208,48 @@ export function Board({ saved, game, session }: { saved: SavedGame; game: GameSt
     [play],
   )
 
-  const finishDrag = useCallback(
-    (d: Drag) => {
-      const { game: g, viewer: v, selection: sel, attaching: waiting } = latest.current
-      if (d.kind === 'box') {
-        if (!d.moved) {
-          if (!d.shift) setSelected(new Set())
-          return
-        }
-        const box = {
-          left: Math.min(d.start.x, d.at.x) - d.field.left,
-          right: Math.max(d.start.x, d.at.x) - d.field.left,
-          top: Math.min(d.start.y, d.at.y) - d.field.top,
-          bottom: Math.max(d.start.y, d.at.y) - d.field.top,
-        }
-        const ids = cardsInBox(looseCards(g, d.seat), box, d.field, d.seat !== v)
-        setSelected(d.shift ? new Set([...sel, ...ids]) : new Set(ids))
-        return
-      }
-      const [first] = d.ids
-      if (!d.moved) {
-        if (d.source !== 'battlefield' || first === undefined) return
-        if (waiting) {
-          if (!waiting.includes(first)) for (const id of waiting) play({ type: 'attach', id, to: first })
-          setAttaching(null)
-        } else if (d.shift) {
-          const next = new Set(sel)
-          if (next.has(first)) next.delete(first)
-          else next.add(first)
-          setSelected(next)
-        } else {
-          tapCards(first)
-        }
-        return
-      }
-      const target = dropTarget(d.at.x, d.at.y)
-      const drop = target?.dataset.drop
-      // A panel over the table ("none") keeps a card from dropping on what's under it.
-      if (!target || !drop || drop === 'none') return
-      const [zone, seatText] = drop.split('-') as [string, string | undefined]
-      if (zone === 'battlefield') {
-        const seat = Number(seatText) as SeatIndex
-        const rect = target.getBoundingClientRect()
-        const at = d.ids.map((id) =>
-          fromScreen({ x: d.at.x + d.offsets[id]!.dx - rect.left, y: d.at.y + d.offsets[id]!.dy - rect.top }, rect, seat !== v),
-        )
-        play({ type: 'move', ids: d.ids, to: { zone: 'battlefield', seat, at } })
-        return
-      }
-      const to: Dest =
-        zone === 'library'
-          ? { zone: 'library', at: 'top' }
-          : zone === 'stack'
-            ? { zone: 'stack' }
-            : { zone: zone as 'hand' | 'graveyard' | 'exile' | 'command' }
-      // A card dropped back where it is stays put.
-      const moving = d.ids.filter((id) => g.cards[id]!.zone !== to.zone)
-      if (moving.length > 0) moveCards(moving, to)
-    },
-    [play, moveCards, tapCards],
-  )
-
-  // One set of window listeners follows a drag from its pointerdown to its pointerup.
+  // The press under way, followed from its pointerdown to its pointerup by window listeners (followDrag).
   const dragRef = useRef<Drag | null>(null)
-  const followDrag = useCallback(() => {
-    const onMove = (e: globalThis.PointerEvent) => {
-      const d = dragRef.current
-      if (!d) return
-      const moved = d.moved || Math.hypot(e.clientX - d.start.x, e.clientY - d.start.y) > DRAG_START_PX
-      dragRef.current = { ...d, at: { x: e.clientX, y: e.clientY }, moved }
-      if (moved && !d.moved) setDragging(true)
-      if (moved) dragStore.set(dragRef.current)
-    }
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      const d = dragRef.current
-      dragRef.current = null
-      dragStore.set(null)
-      setDragging(false)
-      if (d) finishDrag(d)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-  }, [finishDrag, dragStore])
+  // A finger held still this long opens a menu (LONG_PRESS_MS).
+  const holdTimer = useRef<number | undefined>(undefined)
+  // A finger's press has opened a menu: what the browser still makes of it is spent (the effect below).
+  const spent = useRef(false)
+  // When a finger's tap last played a card, and the kind of pointer the last press was (see doubleClickCard).
+  const tapPlayed = useRef(-Infinity)
+  const lastPointer = useRef('')
 
-  const beginCardDrag = useCallback(
-    (e: PointerEvent, id: string, source: DragSource) => {
-      if (e.button !== 0) return
-      e.stopPropagation()
-      const { selection: sel } = latest.current
-      const ids = source === 'battlefield' && sel.has(id) ? [...sel] : [id]
-      const offsets: Record<string, { dx: number; dy: number; height: number }> = {}
-      for (const i of ids) {
-        const rect = document.querySelector(`[data-card="${CSS.escape(i)}"]`)?.getBoundingClientRect()
-        offsets[i] = rect
-          ? { dx: rect.left + rect.width / 2 - e.clientX, dy: rect.top + rect.height / 2 - e.clientY, height: Math.max(rect.width, rect.height) }
-          : { dx: 0, dy: 0, height }
-      }
-      const start = { x: e.clientX, y: e.clientY }
-      dragRef.current = { kind: 'cards', ids, source, start, at: start, offsets, moved: false, shift: e.shiftKey }
-      followDrag()
+  /** Ends the press under way, if there is one, without a drop or a tap. */
+  const endPress = useCallback(() => {
+    window.clearTimeout(holdTimer.current)
+    if (dragRef.current === null) return
+    dragRef.current = null
+    dragStore.set(null)
+    setDragging(false)
+  }, [dragStore])
+
+  /**
+   * Opens a menu, ending the press under way: the finger that held a card for its menu (or the button of a Mac's
+   * Control-click) lifts without tapping or dropping it.
+   */
+  const openMenu = useCallback(
+    (at: MenuAt, title: string, items: MenuItem[]) => {
+      endPress()
+      if (at.byFinger) spent.current = true
+      setMenu({ x: at.x, y: at.y, title, items })
     },
-    [followDrag, height],
+    [endPress],
   )
 
-  const beginBoxSelect = useCallback(
-    (e: PointerEvent, seat: SeatIndex) => {
-      const start = { x: e.clientX, y: e.clientY }
-      const fieldRect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-      dragRef.current = { kind: 'box', seat, field: fieldRect, start, at: start, moved: false, shift: e.shiftKey }
-      followDrag()
-    },
-    [followDrag],
-  )
-
-  const openMenu = (e: MouseEvent, title: string, items: MenuItem[]) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setMenu({ x: e.clientX, y: e.clientY, title, items })
-  }
-
-  const openCardMenu = useCallback(
-    (e: MouseEvent, id: string) => {
+  /** A card's menu (spec §5.9.4). A finger's has View card, as it has no hover for the large preview. */
+  const cardMenu = useCallback(
+    (at: MenuAt, id: string) => {
       const { game: g, selection: sel, viewer: v } = latest.current
       const card = g.cards[id]
       if (!card) return
       const name = nameFor(g, id, v)
       const ids = card.zone === 'battlefield' && sel.has(id) ? [...sel] : [id]
       const title = ids.length > 1 ? `${ids.length} cards` : name
+      const open = (items: MenuItem[]) => openMenu(at, title, withView(items, at.byFinger && visibleTo(card, v) ? () => setViewing(id) : null))
       const moves = (except: string): MenuItem[] =>
         (
           [
@@ -298,7 +268,7 @@ export function Board({ saved, game, session }: { saved: SavedGame; game: GameSt
         const plus = cards.some((c) => (c.counters['+1/+1'] ?? 0) > 0)
         // A face-down card can't flip or be copied: either would tell the other seat what it is (or that it has two faces).
         const oneFaceUp = ids.length === 1 && !card.faceDown
-        openMenu(e, title, [
+        open([
           { label: tapTo(cards) ? 'Tap' : 'Untap', hint: 't', onSelect: () => play({ type: 'tap', ids, tapped: tapTo(cards) }) },
           ...(oneFaceUp && canFlip(g, id) ? [{ label: 'Flip', hint: 'f', onSelect: () => play({ type: 'flip', id }) }] : []),
           {
@@ -329,7 +299,7 @@ export function Board({ saved, game, session }: { saved: SavedGame; game: GameSt
         return
       }
       if (card.zone === 'hand') {
-        openMenu(e, title, [
+        open([
           { label: 'Play', onSelect: () => playCard(id) },
           { label: 'Put onto the battlefield', onSelect: () => moveCards(ids, { zone: 'battlefield', seat: card.owner }) },
           { label: 'Discard', onSelect: () => moveCards(ids, { zone: 'graveyard' }) },
@@ -341,29 +311,29 @@ export function Board({ saved, game, session }: { saved: SavedGame; game: GameSt
       }
       const zone = card.zone
       if (zone === 'command' && g.data[id]!.kind === 'emblem') {
-        openMenu(e, title, [
+        open([
           { label: 'Put an ability on the stack', onSelect: () => play({ type: 'ability', id }) },
           { label: 'Remove the emblem', onSelect: () => moveCards([id], { zone: 'exile' }) },
         ])
         return
       }
-      openMenu(e, title, [
+      open([
         ...(zone === 'command' ? [{ label: 'Play', onSelect: () => playCard(id) }] : []),
         { label: 'Put onto the battlefield', onSelect: () => moveCards(ids, { zone: 'battlefield', seat: card.owner }) },
         ...moves(zone),
         { label: 'Put an ability on the stack', onSelect: () => play({ type: 'ability', id }) },
       ])
     },
-    [play, moveCards, playCard, tokenItems],
+    [play, moveCards, playCard, tokenItems, openMenu],
   )
 
-  const openLibraryMenu = useCallback(
-    (e: MouseEvent, seat: SeatIndex) => {
+  const libraryMenu = useCallback(
+    (at: MenuAt, seat: SeatIndex) => {
       const { game: g, viewer: v } = latest.current
       const size = g.seats[seat]!.library.length
       const mine = seat === v
       const top = g.seats[seat]!.library[0]
-      openMenu(e, `${g.seats[seat]!.name}'s library (${size})`, [
+      openMenu(at, `${g.seats[seat]!.name}'s library (${size})`, [
         { label: 'Draw a card', onSelect: () => play({ type: 'draw', seat, count: 1 }) },
         {
           label: 'Draw…',
@@ -387,24 +357,24 @@ export function Board({ saved, game, session }: { saved: SavedGame; game: GameSt
         { label: 'Shuffle', onSelect: () => play({ type: 'shuffle', seat }) },
       ])
     },
-    [play],
+    [play, openMenu],
   )
 
-  const openFieldMenu = useCallback(
-    (e: MouseEvent, seat: SeatIndex) => {
+  const fieldMenu = useCallback(
+    (at: MenuAt, seat: SeatIndex) => {
       const g = latest.current.game
-      openMenu(e, `${g.seats[seat]!.name}'s battlefield`, [{ label: 'Create token…', onSelect: () => setDialog({ kind: 'token', seat }) }])
+      openMenu(at, `${g.seats[seat]!.name}'s battlefield`, [{ label: 'Create token…', onSelect: () => setDialog({ kind: 'token', seat }) }])
     },
-    [],
+    [openMenu],
   )
 
-  const openStackMenu = useCallback(
-    (e: MouseEvent, item: string) => {
-      const g = latest.current.game
+  const stackMenu = useCallback(
+    (at: MenuAt, item: string) => {
+      const { game: g, viewer: v } = latest.current
       const found = g.stack.find((i) => i.id === item)
       if (!found) return
       const spell = found.kind === 'spell'
-      openMenu(e, spell ? g.data[item]!.name : `${found.name}: ability`, [
+      const items: MenuItem[] = [
         { label: 'Resolve', onSelect: () => play({ type: 'resolve', item }) },
         // A spell's tokens, for when it resolves: made for its controller.
         ...(spell ? tokenItems(g.data[item]!, g.cards[item]!.controller) : []),
@@ -415,10 +385,289 @@ export function Board({ saved, game, session }: { saved: SavedGame; game: GameSt
               { label: 'Exile', onSelect: () => moveCards([item], { zone: 'exile' }) },
             ]
           : []),
-      ])
+      ]
+      const view = at.byFinger && spell && visibleTo(g.cards[item]!, v) ? () => setViewing(item) : null
+      openMenu(at, spell ? g.data[item]!.name : `${found.name}: ability`, withView(items, view))
     },
-    [play, moveCards, tokenItems],
+    [play, moveCards, tokenItems, openMenu],
   )
+
+  /** The menu a finger's press opens where it went down: held still on anything, or a tap on the stack or in a pile. */
+  const pressMenu = useCallback(
+    (d: Drag) => {
+      const at = { ...d.start, byFinger: true }
+      if (d.kind === 'cards') {
+        if (d.source === 'stack') stackMenu(at, d.card)
+        else cardMenu(at, d.card)
+      } else if (d.kind === 'box') fieldMenu(at, d.seat)
+      else if ('library' in d.target) libraryMenu(at, d.target.library)
+      else stackMenu(at, d.target.item)
+    },
+    [cardMenu, libraryMenu, fieldMenu, stackMenu],
+  )
+
+  const finishDrag = useCallback(
+    (d: Drag) => {
+      const { game: g, viewer: v, selection: sel, attaching: waiting, selecting: adding } = latest.current
+      if (d.kind === 'hold') {
+        // A tap on a library is its click (a draw); one on an ability on the stack opens its menu, Resolve first.
+        if (!d.moved && 'item' in d.target) pressMenu(d)
+        return
+      }
+      if (d.kind === 'box') {
+        // Shift, or Select's mode, adds to the selection.
+        if (!d.moved) {
+          if (!d.shift && !adding) setSelected(new Set())
+          return
+        }
+        const box = {
+          left: Math.min(d.start.x, d.at.x) - d.field.left,
+          right: Math.max(d.start.x, d.at.x) - d.field.left,
+          top: Math.min(d.start.y, d.at.y) - d.field.top,
+          bottom: Math.max(d.start.y, d.at.y) - d.field.top,
+        }
+        const ids = cardsInBox(looseCards(g, d.seat), box, d.field, d.seat !== v)
+        setSelected(d.shift || adding ? new Set([...sel, ...ids]) : new Set(ids))
+        return
+      }
+      const { card } = d
+      if (!d.moved) {
+        const press = { touch: d.touch, shift: d.shift, sincePlay: d.time - tapPlayed.current }
+        switch (tapAction(d.source, press, { attaching: waiting !== null, selecting: adding })) {
+          case 'attach':
+            if (waiting && !waiting.includes(card)) for (const id of waiting) play({ type: 'attach', id, to: card })
+            setAttaching(null)
+            break
+          case 'select': {
+            const next = new Set(sel)
+            if (next.has(card)) next.delete(card)
+            else next.add(card)
+            setSelected(next)
+            break
+          }
+          case 'tap':
+            tapCards(card)
+            break
+          case 'play':
+            // An emblem isn't played: it stays in the command zone, and a tap opens its menu instead.
+            if (g.data[card]!.kind === 'emblem') pressMenu(d)
+            else {
+              playCard(card)
+              tapPlayed.current = performance.now()
+            }
+            break
+          case 'menu':
+            pressMenu(d)
+            break
+        }
+        return
+      }
+      const target = dropTarget(d.at.x, d.at.y)
+      const drop = target?.dataset.drop
+      // A panel over the table ("none") keeps a card from dropping on what's under it.
+      if (!target || !drop || drop === 'none') return
+      const [zone, seatText] = drop.split('-') as [string, string | undefined]
+      if (zone === 'battlefield') {
+        const seat = Number(seatText) as SeatIndex
+        const rect = target.getBoundingClientRect()
+        const at = d.ids.map((id) =>
+          fromScreen({ x: d.at.x + d.offsets[id]!.dx - rect.left, y: d.at.y + d.offsets[id]!.dy - rect.top }, rect, seat !== v),
+        )
+        play({ type: 'move', ids: d.ids, to: { zone: 'battlefield', seat, at } })
+        return
+      }
+      const to: Dest =
+        zone === 'library'
+          ? { zone: 'library', at: 'top' }
+          : zone === 'stack'
+            ? { zone: 'stack' }
+            : { zone: zone as 'hand' | 'graveyard' | 'exile' | 'command' }
+      // A card dropped back where it is stays put.
+      const moving = d.ids.filter((id) => g.cards[id]!.zone !== to.zone)
+      if (moving.length > 0) moveCards(moving, to)
+    },
+    [play, moveCards, playCard, tapCards, pressMenu],
+  )
+
+  /**
+   * A double-click on a card in hand or the command zone plays it: a mouse's. A finger's or a pen's tap has played it
+   * already (tapAction), and a double-tap's dblclick would play the card that moved under it.
+   */
+  const doubleClickCard = useCallback(
+    (id: string) => {
+      if (!isTouch(lastPointer.current)) playCard(id)
+    },
+    [playCard],
+  )
+
+  // One set of window listeners follows a press from its pointerdown to its pointerup, or to its pointercancel (the
+  // browser took the pointer: a system gesture, say), which ends it without a drop or a tap.
+  const followDrag = useCallback(
+    (pointer: number) => {
+      const onMove = (e: globalThis.PointerEvent) => {
+        const d = dragRef.current
+        if (e.pointerId !== pointer || d === null || d.pointer !== pointer) return
+        const at = { x: e.clientX, y: e.clientY }
+        const moved = movedFar(d, at)
+        dragRef.current = { ...d, at, moved }
+        if (moved && !d.moved) window.clearTimeout(holdTimer.current)
+        // A held library or ability that moves is just no longer held: there's nothing to drag.
+        if (d.kind === 'hold') return
+        if (moved && !d.moved) setDragging(true)
+        if (moved) dragStore.set(dragRef.current)
+      }
+      const onEnd = (e: globalThis.PointerEvent) => {
+        if (e.pointerId !== pointer) return
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', onEnd)
+        window.removeEventListener('pointercancel', onEnd)
+        const d = dragRef.current
+        if (d === null || d.pointer !== pointer) return
+        endPress()
+        if (e.type === 'pointerup') finishDrag(d)
+      }
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', onEnd)
+      window.addEventListener('pointercancel', onEnd)
+    },
+    [finishDrag, endPress, dragStore],
+  )
+
+  /**
+   * Starts following a press. Its pointer is captured, so its moves and its end come to the board wherever they go; a
+   * finger (or a pen) held still on it opens its menu.
+   */
+  const beginPress = useCallback(
+    (e: PointerEvent, drag: Drag) => {
+      // One press at a time: a second finger while one is down does nothing. The same pointer down again means its end
+      // never came, so the new press takes its place.
+      if (dragRef.current !== null && dragRef.current.pointer !== e.pointerId) return
+      ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+      window.clearTimeout(holdTimer.current)
+      dragRef.current = drag
+      if (drag.touch) {
+        holdTimer.current = window.setTimeout(() => {
+          const d = dragRef.current
+          if (d !== null && d.pointer === drag.pointer && holdOpensMenu(d)) pressMenu(d)
+        }, LONG_PRESS_MS)
+      }
+      followDrag(e.pointerId)
+    },
+    [followDrag, pressMenu],
+  )
+
+  const beginCardDrag = useCallback(
+    (e: PointerEvent, id: string, source: DragSource) => {
+      if (e.button !== 0) return
+      e.stopPropagation()
+      const { selection: sel } = latest.current
+      const ids = source === 'battlefield' && sel.has(id) ? [...sel] : [id]
+      const offsets: Record<string, { dx: number; dy: number; height: number }> = {}
+      for (const i of ids) {
+        const rect = document.querySelector(`[data-card="${CSS.escape(i)}"]`)?.getBoundingClientRect()
+        offsets[i] = rect
+          ? { dx: rect.left + rect.width / 2 - e.clientX, dy: rect.top + rect.height / 2 - e.clientY, height: Math.max(rect.width, rect.height) }
+          : { dx: 0, dy: 0, height }
+      }
+      const start = { x: e.clientX, y: e.clientY }
+      beginPress(e, {
+        kind: 'cards',
+        card: id,
+        ids,
+        source,
+        offsets,
+        shift: e.shiftKey,
+        time: performance.now(),
+        start,
+        at: start,
+        moved: false,
+        touch: isTouch(e.pointerType),
+        pointer: e.pointerId,
+      })
+    },
+    [beginPress, height],
+  )
+
+  const beginBoxSelect = useCallback(
+    (e: PointerEvent, seat: SeatIndex) => {
+      const start = { x: e.clientX, y: e.clientY }
+      const fieldRect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+      beginPress(e, { kind: 'box', seat, field: fieldRect, shift: e.shiftKey, start, at: start, moved: false, touch: isTouch(e.pointerType), pointer: e.pointerId })
+    },
+    [beginPress],
+  )
+
+  const beginHold = useCallback(
+    (e: PointerEvent, target: HoldTarget) => {
+      // A mouse right-clicks for these menus (and clicks a library to draw): its press is the browser's.
+      if (e.button !== 0 || !isTouch(e.pointerType)) return
+      e.stopPropagation()
+      const start = { x: e.clientX, y: e.clientY }
+      beginPress(e, { kind: 'hold', target, start, at: start, moved: false, touch: true, pointer: e.pointerId })
+    },
+    [beginPress],
+  )
+
+  const openCardMenu = useCallback((e: MouseEvent, id: string) => cardMenu(menuEvent(e), id), [cardMenu])
+  const openLibraryMenu = useCallback((e: MouseEvent, seat: SeatIndex) => libraryMenu(menuEvent(e), seat), [libraryMenu])
+  const openFieldMenu = useCallback((e: MouseEvent, seat: SeatIndex) => fieldMenu(menuEvent(e), seat), [fieldMenu])
+  const openStackMenu = useCallback((e: MouseEvent, item: string) => stackMenu(menuEvent(e), item), [stackMenu])
+
+  // A finger's press that opened a menu: the browser's own long-press (a contextmenu) and the click the press ends with
+  // would land on the menu now over it, closing it or choosing what's under the finger, and its mousedown would focus
+  // the item under the finger, which would look chosen. They're spent, until the next press. And while a finger is
+  // down, its long-press is the board's own (LONG_PRESS_MS), not the browser's.
+  useEffect(() => {
+    const onDown = (e: globalThis.PointerEvent) => {
+      spent.current = false
+      lastPointer.current = e.pointerType
+    }
+    const onMouseDown = (e: globalThis.MouseEvent) => {
+      if (spent.current) e.preventDefault()
+    }
+    const onContextMenu = (e: Event) => {
+      if (!spent.current && !dragRef.current?.touch) return
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    const onClick = (e: globalThis.MouseEvent) => {
+      // A click from the keyboard (detail 0) is no press's.
+      if (!spent.current || e.detail === 0) return
+      spent.current = false
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    window.addEventListener('pointerdown', onDown, true)
+    window.addEventListener('mousedown', onMouseDown, true)
+    window.addEventListener('contextmenu', onContextMenu, true)
+    window.addEventListener('click', onClick, true)
+    return () => {
+      window.removeEventListener('pointerdown', onDown, true)
+      window.removeEventListener('mousedown', onMouseDown, true)
+      window.removeEventListener('contextmenu', onContextMenu, true)
+      window.removeEventListener('click', onClick, true)
+      window.clearTimeout(holdTimer.current)
+    }
+  }, [])
+
+  // A finger's swipe down the table mustn't pull the page down to reload it (Chrome on Android) in the middle of a game.
+  useEffect(() => {
+    const root = document.documentElement
+    const before = root.style.overscrollBehaviorY
+    root.style.overscrollBehaviorY = 'none'
+    return () => {
+      root.style.overscrollBehaviorY = before
+    }
+  }, [])
+
+  // Android's Back closes a menu, a dialog, or the card viewed. They share one history entry, as one can open the next
+  // as it closes (a menu's Draw… opens its dialog).
+  const closeOverlays = useCallback(() => {
+    setMenu(null)
+    setDialog(null)
+    setViewing(null)
+  }, [])
+  useBackToClose(menu !== null || dialog !== null || viewed !== null, closeOverlays)
 
   const nextTurn = useCallback(() => {
     const g = latest.current.game
@@ -488,17 +737,27 @@ export function Board({ saved, game, session }: { saved: SavedGame; game: GameSt
     setHovered,
     cardHeight: height,
     attaching,
+    coarse,
     play,
     moveCards,
-    playCard,
+    doubleClickCard,
     beginCardDrag,
     beginBoxSelect,
+    beginHold,
     openCardMenu,
     openLibraryMenu,
     openFieldMenu,
     openStackMenu,
     openPile: (seat, zone) => setPile({ seat, zone }),
   }
+
+  /** The turn bar's ⋯, where a finger's bar is too narrow for all its buttons: the ones that don't fit. */
+  const openBarMenu = (e: MouseEvent) =>
+    openMenu(menuEvent(e), 'The game', [
+      { label: logOpen ? 'Close the log' : 'Log', onSelect: () => setLogOpen((open) => !open) },
+      { label: 'Switch side', hint: 'Tab', disabled: !twoSeats, onSelect: switchSide },
+      { label: 'End game', onSelect: () => setDialog({ kind: 'end' }) },
+    ])
 
   const top = twoSeats ? other(viewer) : null
   const rematchable = decks.data !== undefined && setup.seats.every((s) => decks.data.some((d) => d.id === s.deckId))
@@ -510,7 +769,8 @@ export function Board({ saved, game, session }: { saved: SavedGame; game: GameSt
           pointerX.current = e.clientX
         }}
         onContextMenu={(e) => e.preventDefault()}
-        className="relative flex h-full flex-col gap-1.5 select-none"
+        // touch-none: a finger drags cards and draws boxes on the table; it doesn't scroll or zoom the page.
+        className="relative flex h-full touch-none flex-col gap-1.5 select-none"
       >
         {saveStatus === 'retrying' && (
           <p role="alert" className="absolute top-1 left-1/2 z-50 -translate-x-1/2 rounded-md bg-red-800 px-3 py-1 text-sm text-red-50 shadow-lg">
@@ -518,9 +778,15 @@ export function Board({ saved, game, session }: { saved: SavedGame; game: GameSt
           </p>
         )}
         {attaching && (
-          <p role="status" className="absolute top-1 left-1/2 z-50 -translate-x-1/2 rounded-md bg-amber-700 px-3 py-1 text-sm text-white shadow-lg">
-            Click the card to attach {list(attaching.map((id) => nameFor(game, id, viewer)))} to (Esc cancels)
-          </p>
+          <div className="absolute top-1 left-1/2 z-50 flex max-w-[calc(100%-1rem)] -translate-x-1/2 items-center gap-3 rounded-md bg-amber-700 py-0.5 pr-1 pl-3 text-sm text-white shadow-lg">
+            <p role="status" className="min-w-0">
+              {coarse ? 'Tap' : 'Click'} the card to attach {list(attaching.map((id) => nameFor(game, id, viewer)))} to
+              {coarse ? '' : ' (Esc cancels)'}
+            </p>
+            <button onClick={() => setAttaching(null)} className="shrink-0 rounded px-2 py-0.5 font-medium hover:bg-amber-600 pointer-coarse:py-2">
+              Cancel
+            </button>
+          </div>
         )}
         {top !== null && (
           <>
@@ -535,10 +801,14 @@ export function Board({ saved, game, session }: { saved: SavedGame; game: GameSt
           saveStatus={saveStatus}
           canUndo={canUndo}
           canSwitch={twoSeats}
+          selecting={selecting}
+          onSelecting={setSelecting}
+          onClear={() => setSelected(new Set())}
           onUndo={undo}
           onLog={() => setLogOpen((open) => !open)}
           onSwitch={switchSide}
           onEnd={() => setDialog({ kind: 'end' })}
+          onMore={openBarMenu}
           onNextTurn={nextTurn}
         />
         <div className="flex min-h-0 flex-1 gap-1.5">
@@ -549,8 +819,9 @@ export function Board({ saved, game, session }: { saved: SavedGame; game: GameSt
       </div>
 
       <DragLayer store={dragStore} game={game} viewer={viewer} />
-      {hovered !== null && !dragging && menu === null && <Preview id={hovered} pointerX={pointerX.current} />}
+      {hovered !== null && !dragging && menu === null && viewed === null && <Preview id={hovered} pointerX={pointerX.current} />}
       {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
+      {viewed !== null && <CardViewer id={viewed} onClose={() => setViewing(null)} />}
       {pile && <PilePanel seat={pile.seat} zone={pile.zone} onClose={() => setPile(null)} />}
       {logOpen && <LogPanel actions={saved.actions} onClose={() => setLogOpen(false)} />}
       {dialog && (
@@ -596,7 +867,7 @@ function createDragStore() {
 /** The cards being dragged, following the pointer, or the box being drawn to select cards. */
 function DragLayer({ store, game, viewer }: { store: ReturnType<typeof createDragStore>; game: GameState; viewer: SeatIndex }) {
   const drag = useSyncExternalStore(store.subscribe, store.get)
-  if (drag === null || !drag.moved) return null
+  if (drag === null || !drag.moved || drag.kind === 'hold') return null
   if (drag.kind === 'box') {
     return (
       <div
