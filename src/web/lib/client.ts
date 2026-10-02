@@ -1,6 +1,7 @@
 import { createContext, useContext } from 'react'
 import type { LanClient } from '../../shared/types.ts'
 import { ApiRequestError } from './api.ts'
+import { isThisComputersHostname } from './platform.ts'
 
 /**
  * Who this page is to Binder (spec §5.10), as GET /api/lan/me says before the app shows: the PC running Binder, a
@@ -19,15 +20,6 @@ export function clientFromAnswer(answer: LanClient): ClientView {
     default:
       return { kind: 'pc' }
   }
-}
-
-/**
- * Whether a page's hostname is this computer's own: 127.0.0.1 (the desktop app), `localhost` (pnpm start, the dev
- * server) or [::1]. Only there can the server take the page as the PC's; anywhere else (the phones' listener, the dev
- * server's `--host` address) it's a phone's.
- */
-export function isThisComputersHostname(hostname: string): boolean {
-  return ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(hostname.toLowerCase())
 }
 
 /**

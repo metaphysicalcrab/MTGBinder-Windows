@@ -13,7 +13,15 @@ import {
   SAMPLE_SIZE,
   spaceCaptures,
 } from '../../lib/capture.ts'
-import { CAN_USE_LIVE_CAMERA, detectPlatform, IS_ANDROID, PLATFORM, type Platform, useCoarsePointer } from '../../lib/platform.ts'
+import {
+  CAN_USE_LIVE_CAMERA,
+  detectPlatform,
+  inBinderApp,
+  IS_ANDROID,
+  PLATFORM,
+  type Platform,
+  useCoarsePointer,
+} from '../../lib/platform.ts'
 import { shortcutAllowed } from '../../lib/shortcuts.ts'
 import { CAPTURE_BUTTON, CaptureBar } from './CaptureBar.tsx'
 import { PhotoPanel, TakePhotoButton } from './PhotoCapture.tsx'
@@ -47,17 +55,10 @@ const store = (key: string, value: string) => {
 }
 
 /**
- * Whether the page runs in Binder's desktop app, whose window names Electron in its user agent. It has no address bar,
- * and once macOS has recorded a refused camera it doesn't ask again: only System Settings turns the camera back on.
- */
-export function inBinderApp(userAgent: string): boolean {
-  return userAgent.includes('Electron/')
-}
-
-/**
  * Why the camera didn't start, and what to do about it where the page runs (`navigator.userAgent`, and the platform it
- * names): System Settings in the Mac's app, Windows' camera privacy settings on a PC, the site's settings in Chrome on
- * Android, and the address bar's camera icon in a desktop browser.
+ * names): System Settings in the Mac's app (which has no address bar, and once macOS has recorded a refused camera it
+ * doesn't ask again), Windows' camera privacy settings on a PC, the site's settings in Chrome on Android, and the
+ * address bar's camera icon in a desktop browser.
  */
 export function describeCameraError(err: unknown, userAgent: string, platform: Platform = detectPlatform({ userAgent })): string {
   const name = err instanceof DOMException ? err.name : ''

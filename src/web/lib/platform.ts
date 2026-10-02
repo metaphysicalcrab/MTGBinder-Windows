@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react'
+import { useCallback, useSyncExternalStore } from 'react'
 
 /**
  * Which platform the page runs on, for the few things that differ (M13): the undo key, wording that names the computer
@@ -26,14 +26,30 @@ export function detectPlatform(nav: NavigatorLike | undefined): Platform {
   return 'other'
 }
 
+/**
+ * Whether the page runs in Binder's desktop app, whose window names Electron in its user agent. It has no address bar,
+ * and its server is Binder itself (under `pnpm start`, Node.js is).
+ */
+export function inBinderApp(userAgent: string): boolean {
+  return userAgent.includes('Electron/')
+}
+
+/**
+ * Whether a page's hostname is this computer's own: 127.0.0.1 (the desktop app), `localhost` (pnpm start, the dev
+ * server) or [::1]. Only there can the server take the page as the PC's; anywhere else (the phones' listener, the dev
+ * server's `--host` address) it's a phone's.
+ */
+export function isThisComputersHostname(hostname: string): boolean {
+  return ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(hostname.toLowerCase())
+}
+
 const nav: (NavigatorLike & Partial<Navigator>) | undefined = typeof navigator === 'undefined' ? undefined : navigator
 
 export const PLATFORM: Platform = detectPlatform(nav)
 export const IS_MAC = PLATFORM === 'mac'
 export const IS_WINDOWS = PLATFORM === 'windows'
 export const IS_ANDROID = PLATFORM === 'android'
-/** Binder's desktop app (Electron names itself in its user agent), which has no address bar. */
-export const IN_DESKTOP_APP = /\bElectron\//.test(nav?.userAgent ?? '')
+export const IN_DESKTOP_APP = inBinderApp(nav?.userAgent ?? '')
 /** The live camera needs a secure context: localhost, the desktop app, or the phone over HTTPS (not plain HTTP). */
 export const CAN_USE_LIVE_CAMERA =
   typeof window !== 'undefined' && window.isSecureContext && typeof nav?.mediaDevices?.getUserMedia === 'function'
@@ -54,22 +70,31 @@ export function isUndoKey(
   return modifier && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'z'
 }
 
-const COARSE = '(pointer: coarse)'
-
-function subscribeToPointer(onChange: () => void): () => void {
-  if (typeof window === 'undefined' || !window.matchMedia) return () => {}
-  const query = window.matchMedia(COARSE)
-  query.addEventListener('change', onChange)
-  return () => query.removeEventListener('change', onChange)
+/**
+ * Whether a media query matches the window, kept up to date as it changes (a phone turned on its side). Rendered without
+ * a window (the tests' server rendering), it's false.
+ */
+export function useMediaQuery(query: string): boolean {
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      if (typeof window === 'undefined' || !window.matchMedia) return () => {}
+      const list = window.matchMedia(query)
+      list.addEventListener('change', onChange)
+      return () => list.removeEventListener('change', onChange)
+    },
+    [query],
+  )
+  return useSyncExternalStore(
+    subscribe,
+    () => typeof window !== 'undefined' && window.matchMedia?.(query).matches === true,
+    () => false,
+  )
 }
-
-const coarseNow = () => typeof window !== 'undefined' && window.matchMedia?.(COARSE).matches === true
 
 /**
  * Whether the main pointer is a finger (a phone or a tablet), as Tailwind's `pointer-coarse:` reads it, for what CSS
- * can't change: a placeholder, what Enter does. A touchscreen laptop's main pointer is its mouse or trackpad. Rendered
- * without a window (the tests' server rendering), it's false.
+ * can't change: a placeholder, what Enter does. A touchscreen laptop's main pointer is its mouse or trackpad.
  */
 export function useCoarsePointer(): boolean {
-  return useSyncExternalStore(subscribeToPointer, coarseNow, () => false)
+  return useMediaQuery('(pointer: coarse)')
 }

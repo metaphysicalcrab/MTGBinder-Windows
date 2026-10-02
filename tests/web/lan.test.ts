@@ -12,7 +12,9 @@ import {
   lastSeenText,
   pairErrorText,
   pairingEndedText,
+  pairsAgainText,
   phoneNameGuess,
+  phonesUseHttps,
   waitText,
 } from '../../src/web/lib/lan.ts'
 
@@ -145,9 +147,31 @@ describe('the address phones open', () => {
   })
 })
 
+describe('the paired phones', () => {
+  const http = { https: false, url: 'http://192.168.1.5:4322' }
+  const https = { https: true, url: 'https://192.168.1.5:4323' }
+
+  it('say which must pair again: paired over HTTP while phones open Binder over HTTPS, and the reverse', () => {
+    expect(pairsAgainText({ https: false }, http)).toBeNull()
+    expect(pairsAgainText({ https: true }, https)).toBeNull()
+    expect(pairsAgainText({ https: false }, https)).toBe('Paired over HTTP: it must pair again to open Binder over HTTPS.')
+    expect(pairsAgainText({ https: true }, http)).toBe('Paired over HTTPS: it must pair again to open Binder while HTTPS is off.')
+  })
+
+  it('go by the address phones open: HTTPS turned on but not working leaves them on HTTP; with phone access off, as it will be', () => {
+    // HTTPS is on, but its port or certificate failed: phones open Binder over HTTP meanwhile, as they paired.
+    const failed = { https: true, url: 'http://192.168.1.5:4322' }
+    expect(phonesUseHttps(failed)).toBe(false)
+    expect(pairsAgainText({ https: false }, failed)).toBeNull()
+    expect(phonesUseHttps({ https: true, url: null })).toBe(true)
+    expect(phonesUseHttps({ https: false, url: null })).toBe(false)
+    expect(pairsAgainText({ https: false }, { https: true, url: null })).toMatch(/^Paired over HTTP:/)
+  })
+})
+
 describe('the firewall notes', () => {
   it('warns on Windows when it calls the network Public, saying where to make it Private, for Wi-Fi or Ethernet', () => {
-    const wifi = firewallNotes(status({ network: { publicProfile: true, name: 'Home 5G' } }), 'windows', false)
+    const wifi = firewallNotes(status({ network: { publicProfile: true, name: 'Home 5G' } }), 'windows', false, true)
     expect(wifi).toEqual([
       {
         tone: 'warning',
@@ -157,26 +181,43 @@ describe('the firewall notes', () => {
           'Network & Internet → Wi-Fi → Home 5G → Network profile → Private).',
       },
     ])
-    const wired = firewallNotes(status({ address: '10.0.0.7', network: { publicProfile: true, name: 'Network 2' } }), 'windows', false)
+    const ethernet = status({ address: '10.0.0.7', network: { publicProfile: true, name: 'Network 2' } })
+    const wired = firewallNotes(ethernet, 'windows', false, true)
     expect(wired[0]!.text).toContain('Network & internet → Ethernet → Network profile type → Private network')
-    expect(firewallNotes(status({ network: { publicProfile: false, name: 'Home 5G' } }), 'windows', false)).toEqual([])
+    expect(firewallNotes(status({ network: { publicProfile: false, name: 'Home 5G' } }), 'windows', false, true)).toEqual([])
   })
 
   it("says what the system's firewall asks, until a phone has paired", () => {
-    const windows = firewallNotes(status(), 'windows', true)
-    expect(windows).toHaveLength(1)
-    expect(windows[0]).toMatchObject({ tone: 'tip' })
-    expect(windows[0]!.text).toMatch(/^The first time, Windows asks whether Binder may use the network: allow it on Private networks/)
-    expect(firewallNotes(status(), 'mac', true)).toEqual([
+    const windows = firewallNotes(status(), 'windows', true, true)
+    expect(windows).toEqual([
+      {
+        tone: 'tip',
+        text:
+          'The first time, Windows asks whether Binder may use the network: allow it on Private networks. If it was cancelled, ' +
+          "phones can't connect until Binder is allowed in Windows Security → Firewall & network protection → Allow an app through " +
+          'firewall.',
+      },
+    ])
+    // Under pnpm start, Node.js listens for phones, and Windows asks about it, and lists it, by its own name.
+    expect(firewallNotes(status(), 'windows', true, false)).toEqual([
+      {
+        tone: 'tip',
+        text:
+          'The first time, Windows asks whether Node.js JavaScript Runtime (node.exe, which runs Binder from the terminal) may use ' +
+          "the network: allow it on Private networks. If it was cancelled, phones can't connect until Node.js JavaScript Runtime " +
+          'is allowed in Windows Security → Firewall & network protection → Allow an app through firewall.',
+      },
+    ])
+    expect(firewallNotes(status(), 'mac', true, true)).toEqual([
       {
         tone: 'tip',
         text: 'macOS may ask whether Binder may accept incoming connections: choose Allow. It may ask again after Binder is rebuilt.',
       },
     ])
-    expect(firewallNotes(status(), 'mac', false)).toEqual([])
-    expect(firewallNotes(status(), 'other', true)).toEqual([])
+    expect(firewallNotes(status(), 'mac', false, true)).toEqual([])
+    expect(firewallNotes(status(), 'other', true, true)).toEqual([])
     // Only Windows has network profiles.
-    expect(firewallNotes(status({ network: { publicProfile: true, name: 'Home 5G' } }), 'mac', false)).toEqual([])
+    expect(firewallNotes(status({ network: { publicProfile: true, name: 'Home 5G' } }), 'mac', false, true)).toEqual([])
   })
 })
 

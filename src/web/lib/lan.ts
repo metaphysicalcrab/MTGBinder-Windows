@@ -118,12 +118,15 @@ export interface LanNote {
  * What to know about this computer's firewall while phone access is on (spec §5.10). `firstTime`: no phone has paired
  * yet, so the system may not have been asked yet, or was answered wrongly. On Windows, its firewall asks the first time
  * Binder listens for phones, and a network Windows calls Public blocks them whatever the answer was; on a Mac, macOS
- * may ask whether Binder may accept incoming connections (again after a rebuild of the app).
+ * may ask whether Binder may accept incoming connections (again after a rebuild of the app). `inApp`: the page is in
+ * the desktop app, whose server is Binder.exe; under `pnpm start` it's node.exe, which Windows names by its
+ * description wherever it asks or lists it.
  */
 export function firewallNotes(
   status: Pick<LanStatus, 'network' | 'addresses' | 'address'>,
   platform: Platform,
   firstTime: boolean,
+  inApp: boolean,
 ): LanNote[] {
   const notes: LanNote[] = []
   if (platform === 'windows') {
@@ -143,11 +146,13 @@ export function firewallNotes(
       })
     }
     if (firstTime) {
+      const app = inApp ? 'Binder' : 'Node.js JavaScript Runtime'
+      const asked = inApp ? app : `${app} (node.exe, which runs Binder from the terminal)`
       notes.push({
         tone: 'tip',
         text:
-          'The first time, Windows asks whether Binder may use the network: allow it on Private networks. If it was ' +
-          "cancelled, phones can't connect until Binder is allowed in Windows Security → Firewall & network protection → " +
+          `The first time, Windows asks whether ${asked} may use the network: allow it on Private networks. If it was ` +
+          `cancelled, phones can't connect until ${app} is allowed in Windows Security → Firewall & network protection → ` +
           'Allow an app through firewall.',
       })
     }
@@ -158,6 +163,26 @@ export function firewallNotes(
     })
   }
   return notes
+}
+
+/**
+ * Whether phones open Binder over HTTPS now: its address is https://… (HTTPS on, and listening). While phone access is
+ * off, or this PC has no address to give, whether it will be once on.
+ */
+export function phonesUseHttps(status: Pick<LanStatus, 'https' | 'url'>): boolean {
+  return status.url ? status.url.startsWith('https:') : status.https
+}
+
+/**
+ * Why a paired phone gets only the pairing page now, or null (spec §5.10): it paired over HTTP and phones open Binder
+ * over HTTPS, or the reverse. Its cookie works only the way it paired.
+ */
+export function pairsAgainText(device: Pick<LanDevice, 'https'>, status: Pick<LanStatus, 'https' | 'url'>): string | null {
+  const https = phonesUseHttps(status)
+  if (device.https === https) return null
+  return https
+    ? 'Paired over HTTP: it must pair again to open Binder over HTTPS.'
+    : 'Paired over HTTPS: it must pair again to open Binder while HTTPS is off.'
 }
 
 /** Settings → Phone access: polled every 2 s while a pairing dialog is open, and every 10 s otherwise. */

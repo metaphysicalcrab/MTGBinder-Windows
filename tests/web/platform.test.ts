@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { detectPlatform, isUndoKey, undoKeyLabelFor } from '../../src/web/lib/platform.ts'
+import { detectPlatform, inBinderApp, isUndoKey, undoKeyLabelFor } from '../../src/web/lib/platform.ts'
 
 // What browsers say about themselves: Chrome on each system (with Chromium's userAgentData), Safari, Binder's own app.
 const MAC_CHROME = {
@@ -46,6 +46,16 @@ describe('platform', () => {
     expect(detectPlatform({ userAgent: MAC_CHROME.userAgent })).toBe('mac')
     expect(detectPlatform({ userAgent: WINDOWS_APP.userAgent, platform: '' })).toBe('windows')
     expect(detectPlatform(undefined)).toBe('other')
+  })
+
+  it("tells Binder's desktop app, which names Electron, from a browser", () => {
+    expect([MAC_CHROME, MAC_SAFARI, WINDOWS_APP, ANDROID_CHROME, LINUX_FIREFOX].map((nav) => inBinderApp(nav.userAgent))).toEqual([
+      false,
+      false,
+      true,
+      false,
+      false,
+    ])
   })
 
   it('reads undo as Cmd+Z on a Mac and Ctrl+Z elsewhere, never with Shift or Alt', () => {

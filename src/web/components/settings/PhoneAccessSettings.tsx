@@ -11,6 +11,8 @@ import {
   groupCode,
   lastSeenText,
   pairingEndedText,
+  pairsAgainText,
+  phonesUseHttps,
   useCancelPairing,
   useForgetAllPhones,
   useForgetDevice,
@@ -20,7 +22,7 @@ import {
   useStartPairing,
   useUpdateLan,
 } from '../../lib/lan.ts'
-import { IS_MAC, IS_WINDOWS, PLATFORM } from '../../lib/platform.ts'
+import { IN_DESKTOP_APP, IS_MAC, IS_WINDOWS, PLATFORM } from '../../lib/platform.ts'
 import { useToast } from '../../lib/toast.tsx'
 import { QrCode } from '../QrCode.tsx'
 import { WindowOverlay } from '../WindowOverlay.tsx'
@@ -177,7 +179,7 @@ export function PhoneAccessSettings() {
           onPair={() => startPairing.mutate(undefined, { onSuccess: () => setPairingOpen(true) })}
         />
       )}
-      {status && status.devices.length > 0 && <PairedPhones devices={status.devices} />}
+      {status && status.devices.length > 0 && <PairedPhones status={status} />}
       {status?.enabled && <HttpsSettings status={status} />}
       {pairingOpen && status && <PairingDialog status={status} onClose={closePairing} />}
     </section>
@@ -187,7 +189,7 @@ export function PhoneAccessSettings() {
 /** While phone access is on: whether phones can connect, and where, and Pair a phone. */
 function PhoneAccessOn({ status, pairing, onPair }: { status: LanStatus; pairing: boolean; onPair: () => void }) {
   const update = useUpdateLan()
-  const notes = firewallNotes(status, PLATFORM, status.devices.length === 0)
+  const notes = firewallNotes(status, PLATFORM, status.devices.length === 0, IN_DESKTOP_APP)
   const inUse = addressInUse(status)
   const chosenGone = status.address !== null && status.address !== inUse
   const picker = status.addresses.length > 1 && (
@@ -229,6 +231,12 @@ function PhoneAccessOn({ status, pairing, onPair }: { status: LanStatus; pairing
       {status.listening && status.url ? (
         <PhoneAddress url={status.url} label="Phones on the same Wi-Fi open Binder at this address, or with this QR code:">
           {picker}
+          {phonesUseHttps(status) && (
+            <p className="text-xs text-stone-500">
+              Each phone installs Binder's certificate first, from the setup address under Use HTTPS: until then, Chrome says the connection
+              isn't private.
+            </p>
+          )}
           <p className="text-xs text-stone-500">
             Each phone is paired at this address: if the router gives this {COMPUTER} another, phones pair again. A reservation for this{' '}
             {COMPUTER} in the router's settings (DHCP) keeps it the same.
@@ -340,6 +348,13 @@ function PairingDialog({ status, onClose }: { status: LanStatus; onClose: () => 
           </div>
           {pairing ? (
             <div className="space-y-4 text-sm text-stone-300">
+              {phonesUseHttps(status) && status.setupUrl && (
+                <p className="rounded-lg border border-amber-900/70 bg-amber-950/30 p-3 text-amber-100">
+                  First, on a phone that hasn't installed Binder's certificate: open{' '}
+                  <span className="font-mono break-all select-all">{status.setupUrl}</span> in Chrome and install it, as the steps under Use
+                  HTTPS say. Until then, Chrome says the connection isn't private.
+                </p>
+              )}
               <p>On the phone, scan this QR code with the camera, and open its link in Chrome: the phone pairs at once.</p>
               <div className="flex justify-center">
                 <QrCode text={pairing.url} size={200} />
@@ -386,8 +401,11 @@ function PairingDialog({ status, onClose }: { status: LanStatus; onClose: () => 
   )
 }
 
-/** The paired phones: each one's name (renamed here), when it paired, and when and where it was last seen; Forget. */
-function PairedPhones({ devices }: { devices: LanDevice[] }) {
+/**
+ * The paired phones: each one's name (renamed here), when it paired, when and where it was last seen, and whether it
+ * must pair again (HTTPS was turned on or off since); Forget.
+ */
+function PairedPhones({ status }: { status: LanStatus }) {
   const now = useNow(30_000)
   const forgetAll = useForgetAllPhones()
   const [confirmingAll, setConfirmingAll] = useState(false)
@@ -395,8 +413,8 @@ function PairedPhones({ devices }: { devices: LanDevice[] }) {
     <div className="mt-6 space-y-3 border-t border-stone-800 pt-5">
       <h3 className="text-sm font-semibold text-stone-200">Paired phones</h3>
       <ul className="divide-y divide-stone-800/70">
-        {devices.map((device) => (
-          <PairedPhone key={device.id} device={device} now={now} />
+        {status.devices.map((device) => (
+          <PairedPhone key={device.id} device={device} pairsAgain={pairsAgainText(device, status)} now={now} />
         ))}
       </ul>
       {confirmingAll ? (
@@ -423,7 +441,7 @@ function PairedPhones({ devices }: { devices: LanDevice[] }) {
   )
 }
 
-function PairedPhone({ device, now }: { device: LanDevice; now: number }) {
+function PairedPhone({ device, pairsAgain, now }: { device: LanDevice; pairsAgain: string | null; now: number }) {
   const rename = useRenameDevice()
   const forget = useForgetDevice()
   const [name, setName] = useState<string | null>(null)
@@ -464,6 +482,7 @@ function PairedPhone({ device, now }: { device: LanDevice; now: number }) {
           <p className="mt-0.5 text-xs text-stone-500">
             Paired {paired} · {lastSeenText(device, now)}
           </p>
+          {pairsAgain && <p className="mt-0.5 text-xs text-amber-300">{pairsAgain}</p>}
         </div>
         <div className="flex gap-2">
           {name === null ? (
@@ -528,7 +547,8 @@ function HttpsSettings({ status }: { status: LanStatus }) {
         </Switch>
         <p className="text-sm text-stone-400">
           Binder makes its own certificate, which vouches only for this {COMPUTER}'s addresses on private networks, and each phone installs
-          it once. Without HTTPS everything else works, and Scan takes a photo of each card.
+          it once. Without HTTPS everything else works, and Scan takes a photo of each card. Phones paired before it's turned on or off
+          must pair again.
         </p>
         {update.error && (
           <p role="alert" className="text-sm text-rose-300">

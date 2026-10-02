@@ -1,4 +1,5 @@
 import type { ApiErrorBody } from '../../shared/types.ts'
+import { isThisComputersHostname } from './platform.ts'
 
 export class ApiRequestError extends Error {
   status: number
@@ -23,6 +24,31 @@ export function retryAfterSeconds(header: string | null): number | undefined {
   return Number.isFinite(seconds) && seconds >= 0 ? Math.ceil(seconds) : undefined
 }
 
+/**
+ * What a request that got no answer at all says, in place of the browser's own words ("Failed to fetch"). On this
+ * computer, Binder isn't running. On a phone, the commonest failure over Wi-Fi: Binder quit or turned phone access off,
+ * the PC is asleep, or the phone is on another network.
+ */
+export function noAnswerText(onThisComputer: boolean): string {
+  return onThisComputer
+    ? "Couldn't reach Binder: check that it's still running"
+    : "Couldn't reach Binder on the PC: check that it's running with Phone access on, and that this phone is on the same Wi-Fi"
+}
+
+/**
+ * fetch, with no answer at all (its TypeError) said as noAnswerText says it, for this page's address. Not an
+ * ApiRequestError, so it's still told apart from what the server answered. An abort is a DOMException, and stays one.
+ */
+export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(path, init)
+  } catch (err) {
+    if (!(err instanceof TypeError)) throw err
+    const hostname = typeof location === 'undefined' ? 'localhost' : location.hostname
+    throw new Error(noAnswerText(isThisComputersHostname(hostname)), { cause: err })
+  }
+}
+
 async function handle<T>(res: Response): Promise<T> {
   if (res.status === 204) return undefined as T
   if (res.ok) return (await res.json()) as T
@@ -42,14 +68,14 @@ async function handle<T>(res: Response): Promise<T> {
 
 /** GETs JSON from the API. Pass React Query's `signal` so superseded requests are cancelled. */
 export async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> {
-  return handle<T>(await fetch(path, { signal }))
+  return handle<T>(await apiFetch(path, { signal }))
 }
 
 /** Sends a change (POST, PUT, PATCH, DELETE) with an optional JSON body. A 204 answer resolves to undefined. */
 export async function apiSend<T>(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> {
   const init: RequestInit =
     body === undefined ? { method } : { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }
-  return handle<T>(await fetch(path, init))
+  return handle<T>(await apiFetch(path, init))
 }
 
 export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
@@ -58,12 +84,12 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
 
 /** POSTs a file, such as a camera capture, as the raw request body. */
 export async function apiUpload<T>(path: string, file: Blob): Promise<T> {
-  return handle<T>(await fetch(path, { method: 'POST', headers: { 'content-type': file.type }, body: file }))
+  return handle<T>(await apiFetch(path, { method: 'POST', headers: { 'content-type': file.type }, body: file }))
 }
 
 /** GETs a plain-text answer (such as a decklist export). */
 export async function apiGetText(path: string, signal?: AbortSignal): Promise<string> {
-  const res = await fetch(path, { signal })
+  const res = await apiFetch(path, { signal })
   if (!res.ok) return handle<string>(res)
   return res.text()
 }
