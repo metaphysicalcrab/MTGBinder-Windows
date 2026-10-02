@@ -151,7 +151,7 @@ describe('local-only guard', () => {
     expect(res.status).toBe(202)
   })
 
-  it("has the dev server proxy to PORT, passing on the page's own Host so the same-origin guard accepts it", async () => {
+  it("has the dev server proxy to PORT, passing on the page's own Host so the same-origin guard accepts it, and the browser's address", async () => {
     const shell = process.env.PORT
     onTestFinished(() => {
       if (shell === undefined) delete process.env.PORT
@@ -160,6 +160,6 @@ describe('local-only guard', () => {
     process.env.PORT = '4999'
     vi.resetModules() // vite.config.ts reads PORT as it loads
     const { default: config } = await import('../../vite.config.ts')
-    expect(config.server?.proxy?.['/api']).toEqual({ target: 'http://127.0.0.1:4999', changeOrigin: false })
+    expect(config.server?.proxy?.['/api']).toEqual({ target: 'http://127.0.0.1:4999', changeOrigin: false, xfwd: true })
   })
 })

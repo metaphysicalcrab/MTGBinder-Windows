@@ -1,7 +1,6 @@
-import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
-import { removeWithRetry, renameWithRetry } from '../fs-retry.ts'
+import { ownerOnlyOnWindows, runTool, writeOwnerOnly, type RunTool } from '../owner-only.ts'
 
 /** A key line: its prefix (leading space and any `export `), then the value. */
 const KEY_LINE = /^(\s*(?:export\s+)?)ANTHROPIC_API_KEY\s*=\s*(.*?)\s*$/
@@ -33,7 +32,7 @@ export interface KeyStoreOptions {
   /** Whose rules make the file private: Windows' access lists, or mode 600 everywhere else. Default: this platform. */
   platform?: NodeJS.Platform
   /** Runs a Windows tool (whoami, icacls) and returns what it printed. Tests pass a stand-in. */
-  run?: (command: string, args: string[]) => string
+  run?: RunTool
 }
 
 /** The file a save writes: `.env` itself, or the file a symlinked `.env` points to. */
@@ -88,36 +87,9 @@ function removeLeftovers(file: string): void {
   }
 }
 
-/** Windows' own tools, by full path, so a program of the same name elsewhere on the PATH is never run instead. */
-const windowsTool = (name: string) =>
-  path.win32.join(process.env.SystemRoot ?? process.env.windir ?? 'C:\\Windows', 'System32', name)
-
-const runTool = (command: string, args: string[]) =>
-  execFileSync(command, args, { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
-
-/**
- * On Windows, makes `file` readable and writable by the current user alone: its inherited entries (which a folder
- * like C:\dev hands to every account on the PC) are removed, and the user, named by their security identifier
- * (S-1-5-21-…, the same in every language Windows speaks), is given full control. Best effort: when it can't, the
- * file keeps its folder's access list, and the reason is logged.
- */
-function ownerOnlyOnWindows(run: NonNullable<KeyStoreOptions['run']>) {
-  let sid: string | undefined
-  return (file: string) => {
-    try {
-      // `whoami /user /fo csv /nh` prints `"pc\name","S-1-5-21-…"`.
-      sid ??= /"(S-1-[\d-]+)"\s*$/.exec(run(windowsTool('whoami.exe'), ['/user', '/fo', 'csv', '/nh']).trim())?.[1]
-      if (!sid) throw new Error("whoami didn't say who the current user is")
-      run(windowsTool('icacls.exe'), [file, '/inheritance:r', '/grant:r', `*${sid}:F`])
-    } catch (err) {
-      console.error(`[api key] Couldn't make ${file} private to this user: ${err instanceof Error ? err.message : String(err)}`)
-    }
-  }
-}
-
 export function createKeyStore(envPath: string, options: KeyStoreOptions = {}): KeyStore {
   const windows = (options.platform ?? process.platform) === 'win32'
-  const ownerOnly = ownerOnlyOnWindows(options.run ?? runTool)
+  const ownerOnly = ownerOnlyOnWindows(options.run ?? runTool, '[api key]')
   removeLeftovers(realFile(envPath))
   const text = () => (fs.existsSync(envPath) ? readText(envPath) : '')
   const lines = () => text().split(/\r?\n/)
@@ -159,29 +131,9 @@ export function createKeyStore(envPath: string, options: KeyStoreOptions = {}): 
         return
       }
       // A private file renamed over .env (or the file a symlinked .env points to): the key is never in a file others
-      // can read, and a crash can't cut off the owner's other lines.
-      const temp = `${file}.${process.pid}.tmp`
-      try {
-        if (windows) {
-          // Made private while it's still empty; the rename keeps its access list.
-          fs.writeFileSync(temp, '', { flag: 'wx' })
-          ownerOnly(temp)
-          fs.writeFileSync(temp, contents)
-          // Windows won't rename over a read-only file. Binder's own saves leave none; one made so by hand is cleared.
-          if (fs.existsSync(file)) fs.chmodSync(file, 0o666)
-        } else {
-          fs.writeFileSync(temp, contents, { flag: 'wx', mode: 0o600 })
-          fs.chmodSync(temp, 0o600) // exactly 600, whatever the umask took away
-        }
-        renameWithRetry(temp, file, { platform: options.platform })
-      } catch (err) {
-        try {
-          removeWithRetry(temp, { platform: options.platform }) // it holds the key
-        } catch {
-          // The next save or start removes it (removeLeftovers); the save's own failure is the one to report.
-        }
-        throw err
-      }
+      // can read, and a crash can't cut off the owner's other lines. A temporary file a failed save couldn't remove
+      // goes at the next save or start (removeLeftovers).
+      writeOwnerOnly(file, contents, { platform: options.platform, ownerOnly })
     },
   }
 }

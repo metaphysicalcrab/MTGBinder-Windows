@@ -270,7 +270,7 @@ describe('saving actions', () => {
 
   it('refuses another game or a position other than the next (409), an action that does not apply (400), and one malformed', async () => {
     const game = await started([await atraxa(), null])
-    const changed = [409, 'conflict', 'The game changed in another window']
+    const changed = [409, 'conflict', 'The game changed in another window or on another device']
     expect(await error(await save(game, 1, keep(game)))).toEqual(changed)
     expect(await error(await save({ ...game, startedAt: '2020-01-01T00:00:00.000Z' }, 0, keep(game)))).toEqual(changed)
     expect(await error(await save(game, 0, { type: 'draw', seat: 0, count: 1 }))).toEqual([400, 'bad_action', 'Finish the mulligans first'])
@@ -290,7 +290,7 @@ describe('saving actions', () => {
     const game = await started([await atraxa(), null])
     await save(game, 0, keep(game))
     await save(game, 1, { type: 'nextTurn' })
-    expect(await error(await undo(game, '0'))).toEqual([409, 'conflict', 'The game changed in another window'])
+    expect(await error(await undo(game, '0'))).toEqual([409, 'conflict', 'The game changed in another window or on another device'])
     expect((await undo({ ...game, startedAt: '2020-01-01T00:00:00.000Z' }, '1')).status).toBe(409)
     expect((await undo(game, '01')).status).toBe(400)
     expect((await undo(game, '1')).status).toBe(204)

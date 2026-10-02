@@ -582,3 +582,72 @@ export type ChatEvent =
   /** The answer failed; with `canContinue`, Continue asks again. */
   | { type: 'error'; message: string; canContinue: boolean }
   | { type: 'done' }
+
+/** An address of this PC that a phone on the same network can open Binder at (spec §5.10). */
+export interface LanAddress {
+  address: string
+  /** The network adapter's name: "Wi-Fi", "Ethernet", "en0". */
+  interface: string
+  /**
+   * The one Binder uses when none is chosen: the first on a real adapter, Wi-Fi before Ethernet. Virtual adapters
+   * (Hyper-V, WSL, VirtualBox, Docker, VPNs) come last and are never recommended: a phone can't reach them.
+   */
+  recommended: boolean
+}
+
+/** A paired phone, as Settings → Phone access lists it. */
+export interface LanDevice {
+  id: number
+  name: string
+  createdAt: string
+  lastSeenAt: string | null
+  lastIp: string | null
+}
+
+/** An open pairing window: the code to type on the phone, and the address its QR code holds. */
+export interface LanPairing {
+  /** 8 digits, shown as "4821 0937". */
+  code: string
+  /** `http://<address>:<port>/pair#k=<key>`: opening it pairs the phone without the code. */
+  url: string
+  expiresAt: string
+}
+
+/** Phone access (spec §5.10), as Settings on the PC shows it: GET and PUT /api/lan. */
+export interface LanStatus {
+  enabled: boolean
+  /** Phones use HTTPS: false until it's turned on. */
+  https: boolean
+  /** The phones' port: 4322 unless BINDER_LAN_PORT moves it. */
+  port: number
+  /** The HTTPS port, the next one up. */
+  httpsPort: number
+  listening: boolean
+  /** Why phones can't connect: "Couldn't listen on port 4322: …". */
+  error: string | null
+  /** This PC's addresses on its networks, best first. */
+  addresses: LanAddress[]
+  /** The address chosen in Settings; null uses the recommended one. */
+  address: string | null
+  /** What the phone opens: https://… when HTTPS is on, else http://…; null when this PC has no address to give. */
+  url: string | null
+  /** `http://<address>:4322/phone-setup` when HTTPS is on, for installing the certificate. */
+  setupUrl: string | null
+  /** The SHA-256 fingerprint of Binder's certificate authority ("AB:CD:…") when HTTPS is on. */
+  caFingerprint: string | null
+  pairing: LanPairing | null
+  /**
+   * How the last pairing window ended, until another opens: the phone paired (with its name), the code expired, or
+   * there were too many wrong codes. Null while one is open, after one is cancelled, and when there was none.
+   */
+  pairingEnded: { reason: 'paired' | 'expired' | 'too_many_tries'; name: string | null } | null
+  devices: LanDevice[]
+  /** On Windows: the network's name, and whether Windows calls it Public (which blocks phones). */
+  network: { publicProfile: boolean; name: string } | null
+}
+
+/** Who is asking (GET /api/lan/me): this PC, a paired phone, or a phone that isn't paired yet. */
+export type LanClient =
+  | { client: 'pc' }
+  | { client: 'device'; id: number; name: string }
+  | { client: 'unpaired'; https: boolean }
