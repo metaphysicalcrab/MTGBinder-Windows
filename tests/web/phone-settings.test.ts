@@ -84,4 +84,13 @@ describe('the pairing page', () => {
     expect(page({ lost: true })).toContain('This phone needs to pair with Binder again.')
     expect(page()).not.toContain('pair with Binder again')
   })
+
+  it('asks a phone that is paired already, opened from a QR code, before pairing it again', () => {
+    const html = page({ pairedAs: 'Pixel 8' })
+    expect(html).toContain('This phone is paired as “Pixel 8”.')
+    expect(html).toContain('>Pair again as “Pixel 8”</button>')
+    expect(html).toContain('>Go on to the library</button>')
+    expect(html).not.toContain('Pairing…')
+    expect(html).not.toContain('inputMode="numeric"')
+  })
 })

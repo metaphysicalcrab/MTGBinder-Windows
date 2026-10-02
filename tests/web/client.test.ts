@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { ApiRequestError, retryAfterSeconds } from '../../src/web/lib/api.ts'
 import {
   apiSignal,
+  askAgainIn,
   clientFromAnswer,
   clientOnFailure,
+  isThisComputersHostname,
   pairingKeyIn,
   reportApiError,
   reportForgotten,
@@ -17,17 +19,47 @@ describe('the gate (spec §5.10)', () => {
     expect(clientFromAnswer({ client: 'unpaired', https: true })).toEqual({ kind: 'unpaired', https: true })
   })
 
+  const failures = [
+    new TypeError('Failed to fetch'),
+    new DOMException('The operation timed out.', 'TimeoutError'),
+    new ApiRequestError(404, 'not_found', 'No API route for GET /api/lan/me'),
+    new ApiRequestError(500, 'internal', 'Something went wrong'),
+    new ApiRequestError(429, 'rate_limited', 'Too many requests from this device; try again in 26 s', undefined, 26),
+  ]
+
   it('never locks the PC out: no answer, a Binder from before phones, or a failing server shows the app as before', () => {
-    expect(clientOnFailure(new TypeError('Failed to fetch'))).toEqual({ kind: 'pc' })
-    expect(clientOnFailure(new DOMException('The operation timed out.', 'TimeoutError'))).toEqual({ kind: 'pc' })
-    expect(clientOnFailure(new ApiRequestError(404, 'not_found', 'No API route for GET /api/lan/me'))).toEqual({ kind: 'pc' })
-    expect(clientOnFailure(new ApiRequestError(500, 'internal', 'Something went wrong'))).toEqual({ kind: 'pc' })
-    // Too many requests from a phone: it gets the app, and its first request sends it to the pairing page if need be.
-    expect(clientOnFailure(new ApiRequestError(429, 'rate_limited', 'Too many requests'))).toEqual({ kind: 'pc' })
+    for (const hostname of ['127.0.0.1', 'localhost', 'LOCALHOST', '[::1]']) {
+      for (const err of failures) expect(clientOnFailure(err, hostname)).toEqual({ kind: 'pc' })
+    }
+  })
+
+  it("asks again on a phone's address, rather than show a phone the PC's view", () => {
+    for (const hostname of ['192.168.1.20', 'desktop-binder.local', '10.0.0.5']) {
+      for (const err of failures) expect(clientOnFailure(err, hostname)).toBeNull()
+    }
   })
 
   it('shows the pairing page when the server says this phone is not paired', () => {
-    expect(clientOnFailure(new ApiRequestError(401, 'unpaired', 'Pair this phone'))).toEqual({ kind: 'unpaired', https: false })
+    for (const hostname of ['192.168.1.20', '127.0.0.1']) {
+      expect(clientOnFailure(new ApiRequestError(401, 'unpaired', 'Pair this phone'), hostname)).toEqual({ kind: 'unpaired', https: false })
+    }
+  })
+
+  it("takes only this computer's own hostnames as the PC's, as the server does", () => {
+    expect(isThisComputersHostname('127.0.0.1')).toBe(true)
+    expect(isThisComputersHostname('localhost')).toBe(true)
+    expect(isThisComputersHostname('[::1]')).toBe(true)
+    expect(isThisComputersHostname('192.168.1.20')).toBe(false)
+    expect(isThisComputersHostname('desktop-binder')).toBe(false)
+    expect(isThisComputersHostname('localhost.example.com')).toBe(false)
+  })
+
+  it('asks again as soon as a 429 allows, else after 1 s, 2 s, 4 s… and never more than 10 s apart', () => {
+    expect(askAgainIn(new ApiRequestError(429, 'rate_limited', 'Too many requests', undefined, 26), 1)).toBe(26_000)
+    expect(askAgainIn(new ApiRequestError(429, 'rate_limited', 'Too many requests', undefined, 0), 3)).toBe(1000)
+    const noAnswer = new TypeError('Failed to fetch')
+    expect([1, 2, 3, 4, 5, 9].map((attempt) => askAgainIn(noAnswer, attempt))).toEqual([1000, 2000, 4000, 8000, 10_000, 10_000])
+    expect(askAgainIn(new ApiRequestError(500, 'internal', 'Something went wrong'), 2)).toBe(2000)
   })
 })
 

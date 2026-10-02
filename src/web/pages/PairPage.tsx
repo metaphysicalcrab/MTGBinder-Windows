@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { LanDevice } from '../../shared/types.ts'
 import { ApiRequestError, apiSend } from '../lib/api.ts'
 import { hasPairingKey, takePairingKey } from '../lib/client.ts'
-import { codeDigits, deviceModel, groupCode, pairErrorText, phoneNameGuess } from '../lib/lan.ts'
+import { codeDigits, deviceModel, groupCode, pairErrorText, phoneNameGuess, waitText } from '../lib/lan.ts'
 import { PLATFORM } from '../lib/platform.ts'
 
 type Paired = Pick<LanDevice, 'id' | 'name'>
@@ -17,7 +17,7 @@ async function guessName(): Promise<string> {
  * whose link opens this page with a key that pairs at once. Shown instead of the app to a phone that isn't paired
  * (ClientGate), outside the app's frame: nothing here asks the API for anything but pairing. `lost`: the phone was
  * paired until a moment ago (as `lastName`, offered again). `pairedAs`: it's paired, and was opened from a pairing QR
- * code (pairing again replaces it).
+ * code: it pairs again with its key only when asked to (that replaces it, and uses up the code), or goes on.
  */
 export function PairPage({
   lost,
@@ -39,10 +39,29 @@ export function PairPage({
   // A name typed, or the one the phone had: the model guessed doesn't replace it.
   const named = useRef(known !== null)
   const [fromQrCode] = useState(hasPairingKey)
-  const [pairing, setPairing] = useState(fromQrCode)
+  /** Paired already, and opened from a QR code: Pair again, or Go on to the library. */
+  const [choosing, setChoosing] = useState(pairedAs !== null)
+  /** The QR code's key, kept for Pair again. */
+  const qrKey = useRef<string | null>(null)
+  const [pairing, setPairing] = useState(fromQrCode && pairedAs === null)
   const [error, setError] = useState<string | null>(null)
-  /** After too many tries (429): Pair waits until then. */
-  const [waiting, setWaiting] = useState(false)
+  /** After too many tries (429): when Pair may be tried again, which it counts down to. */
+  const [waitUntil, setWaitUntil] = useState<number | null>(null)
+  const [now, setNow] = useState(Date.now)
+  const waiting = waitUntil !== null
+
+  useEffect(() => {
+    if (waitUntil === null) return
+    const timer = setInterval(() => {
+      const at = Date.now()
+      setNow(at)
+      if (at < waitUntil) return
+      setWaitUntil(null)
+      // Nothing else is said meanwhile: Pair and typing wait.
+      setError(null)
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [waitUntil])
 
   const pair = async (input: { code: string } | { key: string }, as: string) => {
     setPairing(true)
@@ -53,8 +72,8 @@ export function PairPage({
       setError(pairErrorText(err))
       const wait = err instanceof ApiRequestError ? err.retryAfter : undefined
       if (wait) {
-        setWaiting(true)
-        setTimeout(() => setWaiting(false), wait * 1000)
+        setNow(Date.now())
+        setWaitUntil(Date.now() + wait * 1000)
       }
       setPairing(false)
     }
@@ -62,18 +81,26 @@ export function PairPage({
 
   useEffect(() => {
     let alive = true
-    // Opened from the PC's QR code: pairs with its key as soon as the phone's name is known. The key is taken once, so
-    // StrictMode's second run of this effect finds none, and the first run's pairing goes on.
+    // Opened from the PC's QR code: pairs with its key as soon as the phone's name is known, unless it's paired already
+    // (then only on Pair again). The key is taken once, so StrictMode's second run of this effect finds none, and the
+    // first run's pairing goes on.
     const key = takePairingKey()
+    if (key) qrKey.current = key
     void guessName().then((guess) => {
       if (!alive && !key) return
       if (!named.current) setName(guess)
-      if (key) void pair({ key }, known ?? guess)
+      if (key && pairedAs === null) void pair({ key }, known ?? guess)
     })
     return () => {
       alive = false
     }
   }, [])
+
+  const pairAgain = () => {
+    setChoosing(false)
+    // Without the key (it's never missing), the code is typed instead.
+    if (qrKey.current && pairedAs !== null) void pair({ key: qrKey.current }, pairedAs)
+  }
 
   const digits = codeDigits(code)
   const submit = () => {
@@ -90,20 +117,35 @@ export function PairPage({
         {lost && <p className="text-amber-200">This phone needs to pair with Binder again.</p>}
         {pairedAs !== null && (
           <p className="text-stone-300">
-            This phone is paired as “{pairedAs}”. Pairing again replaces it, or{' '}
-            <button type="button" onClick={onSkip} className="text-amber-300 underline-offset-2 hover:underline pointer-coarse:py-2">
-              go on to the library
-            </button>
-            .
+            This phone is paired as “{pairedAs}”. Pairing it again with this QR code replaces that, and uses up the code.
           </p>
         )}
-        <p className="text-stone-400">
-          On the PC: <span className="text-stone-200">Settings → Phone access → Pair a phone</span>. Then scan the QR code it shows with
-          this phone's camera, or type its code here.
-        </p>
+        {!choosing && (
+          <p className="text-stone-400">
+            On the PC: <span className="text-stone-200">Settings → Phone access → Pair a phone</span>. Then scan the QR code it shows with
+            this phone's camera, or type its code here.
+          </p>
+        )}
       </div>
 
-      {fromQrCode && pairing && !error ? (
+      {choosing ? (
+        <div className="flex flex-col gap-3">
+          <button
+            type="button"
+            onClick={pairAgain}
+            className="w-full rounded-lg bg-amber-500 px-4 py-3 font-medium text-stone-950 hover:bg-amber-400"
+          >
+            Pair again as “{pairedAs}”
+          </button>
+          <button
+            type="button"
+            onClick={onSkip}
+            className="w-full rounded-lg border border-stone-700 px-4 py-3 font-medium text-stone-200 hover:bg-stone-800"
+          >
+            Go on to the library
+          </button>
+        </div>
+      ) : fromQrCode && pairing && !error ? (
         <p role="status" className="text-stone-300">
           Pairing…
         </p>
@@ -121,7 +163,8 @@ export function PairPage({
               value={groupCode(code)}
               onChange={(e) => {
                 setCode(codeDigits(e.target.value))
-                setError(null)
+                // How long to wait stays said until Pair can be tried again.
+                if (!waiting) setError(null)
               }}
               autoFocus={!fromQrCode}
               inputMode="numeric"
@@ -151,9 +194,15 @@ export function PairPage({
             disabled={digits.length !== 8 || !name.trim() || pairing || waiting}
             className="w-full rounded-lg bg-amber-500 px-4 py-3 font-medium text-stone-950 hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {pairing ? 'Pairing…' : 'Pair'}
+            {pairing ? 'Pairing…' : waitUntil !== null ? `Try again in ${waitText((waitUntil - now) / 1000)}` : 'Pair'}
           </button>
         </form>
+      )}
+
+      {pairedAs !== null && !choosing && !pairing && (
+        <button type="button" onClick={onSkip} className="text-amber-300 underline-offset-2 hover:underline pointer-coarse:py-2">
+          Go on to the library
+        </button>
       )}
 
       {error && (

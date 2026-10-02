@@ -5,6 +5,7 @@ import { useBackToClose } from '../../lib/back-to-close.ts'
 import { copyText } from '../../lib/clipboard.ts'
 import {
   addressInUse,
+  cancelPairingAsPageGoes,
   countdownText,
   firewallNotes,
   groupCode,
@@ -121,6 +122,14 @@ export function PhoneAccessSettings() {
   const update = useUpdateLan()
   const startPairing = useStartPairing()
   const enabled = status?.enabled ?? false
+  // A pairing window already open as this section first loads (the page was reloaded with its dialog open, and the
+  // window outlived it): its dialog again, so a code that still pairs isn't left unseen.
+  const firstStatus = useRef(true)
+  useEffect(() => {
+    if (!status || !firstStatus.current) return
+    firstStatus.current = false
+    if (status.pairing) setPairingOpen(true)
+  }, [status])
   // Opened at this section (the tray's Phone access opens /settings#phone-access): there, once it's drawn in full. The
   // address then loses its #: going back to an entry with one, as closing a dialog does (useBackToClose), the browser
   // would scroll to it again and take the focus off the button that opened the dialog.
@@ -269,9 +278,9 @@ function PhoneAccessOn({ status, pairing, onPair }: { status: LanStatus; pairing
 
 /**
  * Pairing a phone: the QR code (its link holds a key that pairs the phone that opens it) and the 8-digit code, for 5
- * minutes, until a phone pairs, too many wrong codes are typed, or Cancel (or Back, or Escape) closes it. The status is
- * polled every 2 s meanwhile (useLanStatus), which says how it ended. A click beside it doesn't close it: the phone
- * may still be on its way.
+ * minutes, until a phone pairs, too many wrong codes are typed, or Cancel (or Back, or Escape, or the page going away)
+ * closes it. The status is polled every 2 s meanwhile (useLanStatus), which says how it ended. A click beside it
+ * doesn't close it: the phone may still be on its way.
  */
 function PairingDialog({ status, onClose }: { status: LanStatus; onClose: () => void }) {
   const cancel = useCancelPairing()
@@ -288,6 +297,13 @@ function PairingDialog({ status, onClose }: { status: LanStatus; onClose: () => 
     onClose()
   }, [stillOpen, cancelPairing, onClose])
   useBackToClose(true, close)
+
+  // The page going away with it open (a reload, the window closed) closes the pairing window too.
+  useEffect(() => {
+    if (!stillOpen) return
+    window.addEventListener('pagehide', cancelPairingAsPageGoes)
+    return () => window.removeEventListener('pagehide', cancelPairingAsPageGoes)
+  }, [stillOpen])
 
   useEffect(() => {
     closeRef.current?.focus()

@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { LanStatus } from '../../src/shared/types.ts'
 import { ApiRequestError } from '../../src/web/lib/api.ts'
 import {
   addressInUse,
   agoText,
+  cancelPairingAsPageGoes,
   codeDigits,
   countdownText,
   firewallNotes,
@@ -176,5 +177,19 @@ describe('the firewall notes', () => {
     expect(firewallNotes(status(), 'other', true)).toEqual([])
     // Only Windows has network profiles.
     expect(firewallNotes(status({ network: { publicProfile: true, name: 'Home 5G' } }), 'mac', false)).toEqual([])
+  })
+})
+
+describe('closing the pairing window as the page goes away', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('sends the cancel as a request that outlives the page, and minds no failure', async () => {
+    const fetch = vi.fn((_url: string, _init: RequestInit) => Promise.reject(new TypeError('Failed to fetch')))
+    vi.stubGlobal('fetch', fetch)
+    cancelPairingAsPageGoes()
+    expect(fetch).toHaveBeenCalledWith('/api/lan/pairing', { method: 'DELETE', keepalive: true })
+    await Promise.resolve()
   })
 })

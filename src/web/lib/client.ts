@@ -22,12 +22,29 @@ export function clientFromAnswer(answer: LanClient): ClientView {
 }
 
 /**
- * The view when GET /api/lan/me failed: the app as it was before phones, whatever the failure (no answer, a Binder from
- * before phone access, which has no such route), so the PC is never locked out. A phone shown the app by mistake gets
- * 401 `unpaired` from its first request, which brings the pairing page (apiSignal).
+ * Whether a page's hostname is this computer's own: 127.0.0.1 (the desktop app), `localhost` (pnpm start, the dev
+ * server) or [::1]. Only there can the server take the page as the PC's; anywhere else (the phones' listener, the dev
+ * server's `--host` address) it's a phone's.
  */
-export function clientOnFailure(err: unknown): ClientView {
-  return apiSignal(err) === 'unpaired' ? { kind: 'unpaired', https: false } : { kind: 'pc' }
+export function isThisComputersHostname(hostname: string): boolean {
+  return ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(hostname.toLowerCase())
+}
+
+/**
+ * The view when GET /api/lan/me failed, or null to ask again. On this computer's own address (`hostname`), the app as
+ * it was before phones, whatever the failure (no answer, a Binder from before phone access, which has no such route),
+ * so the PC is never locked out. Anywhere else the page is a phone's, and it asks again rather than guess: a paired
+ * phone shown the PC's view would ask for the PC's own parts, and one that isn't paired would be told it was.
+ */
+export function clientOnFailure(err: unknown, hostname: string): ClientView | null {
+  if (apiSignal(err) === 'unpaired') return { kind: 'unpaired', https: false }
+  return isThisComputersHostname(hostname) ? { kind: 'pc' } : null
+}
+
+/** How long before asking GET /api/lan/me again: what a 429 says to wait, else 1 s, 2 s, 4 s… and at most 10 s. */
+export function askAgainIn(err: unknown, attempt: number): number {
+  if (err instanceof ApiRequestError && err.retryAfter !== undefined) return Math.max(1, err.retryAfter) * 1000
+  return Math.min(10_000, 1000 * 2 ** (attempt - 1))
 }
 
 /**

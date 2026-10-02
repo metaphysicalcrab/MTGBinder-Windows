@@ -202,6 +202,14 @@ export function useCancelPairing() {
   })
 }
 
+/**
+ * Closes the pairing window as the page goes away with its dialog open (a reload, the window closed): a request the
+ * browser sends after the page has gone.
+ */
+export function cancelPairingAsPageGoes(): void {
+  fetch('/api/lan/pairing', { method: 'DELETE', keepalive: true }).catch(() => {})
+}
+
 export function useRenameDevice() {
   const queryClient = useQueryClient()
   const toast = useToast()
