@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createGoTo, GO_TO, GO_TO_MS, isTypingTarget, shortcutAllowed, SHORTCUTS } from '../../src/web/lib/shortcuts.ts'
+import { createGoTo, GO_TO, GO_TO_MS, isTypingTarget, shortcutAllowed, shortcutList, SHORTCUTS } from '../../src/web/lib/shortcuts.ts'
 
 const press = (key: string, target: unknown = { tagName: 'BODY' }, mods: Partial<Record<'ctrlKey' | 'metaKey' | 'altKey', boolean>> = {}) => ({
   key,
@@ -30,9 +30,15 @@ describe('keyboard shortcuts', () => {
   it("has a letter for every page, each its own, in the header's order, and lists every shortcut", () => {
     expect(GO_TO.map((p) => p.path)).toEqual(['/library', '/scan', '/decks', '/playtest', '/search', '/sets', '/brainstorm', '/settings'])
     expect(new Set(GO_TO.map((p) => p.key)).size).toBe(GO_TO.length)
-    expect(SHORTCUTS.map((s) => s.keys.join(' '))).toEqual([
+    expect(shortcutList(true).map((s) => s.keys.join(' '))).toEqual([
       '?', '/', 'g l', 'g c', 'g d', 'g p', 'g s', 'g e', 'g b', 'g t', 'Space', 'a', 't', 'f', '+ -', 'd', 'Tab', '⌘Z', 'Esc',
     ])
+  })
+
+  it('names undo as the computer does: ⌘Z on a Mac, Ctrl+Z on Windows', () => {
+    const undo = (mac: boolean) => shortcutList(mac).find((s) => s.does === 'Undo')?.keys
+    expect([undo(true), undo(false)]).toEqual([['⌘Z'], ['Ctrl+Z']])
+    expect(SHORTCUTS).toHaveLength(shortcutList(false).length)
   })
 
   it('never fires while typing, with Ctrl, Cmd or Alt, or with the card details open', () => {

@@ -116,7 +116,8 @@ export function ChatView({ threadId, configured }: { threadId: number; configure
               e.currentTarget.blur()
             }
           }}
-          className="min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1 text-xl font-semibold text-stone-50 hover:border-stone-800 focus:border-stone-700 focus:outline-none"
+          enterKeyHint="done"
+          className="min-w-0 flex-1 basis-full rounded-md border border-transparent bg-transparent px-1 text-xl font-semibold text-stone-50 hover:border-stone-800 focus:border-stone-700 focus:outline-none sm:basis-0"
         />
         {thread.deck && (
           <Link to={`/decks/${thread.deck.id}`} className="text-sm text-amber-300 hover:underline">
@@ -125,18 +126,23 @@ export function ChatView({ threadId, configured }: { threadId: number; configure
         )}
         <span className="text-sm text-stone-500" title="Estimated from the tokens each answer used, at each model's prices">
           ≈ {formatUsd(thread.costUsd)}
+          {/* What the figure is, for a finger, which has no tooltip. */}
+          <span className="hidden pointer-coarse:inline"> API cost so far</span>
         </span>
         {confirmingDelete ? (
-          <span className="flex items-center gap-2 text-sm">
+          <span className="flex flex-wrap items-center gap-2 text-sm">
             Delete this conversation?
             <button
               onClick={() => remove.mutate()}
               disabled={remove.isPending}
-              className="rounded-md border border-rose-900 px-2 py-0.5 text-rose-300 hover:bg-rose-950 disabled:opacity-50"
+              className="rounded-md border border-rose-900 px-2 py-0.5 text-rose-300 hover:bg-rose-950 disabled:opacity-50 pointer-coarse:px-3 pointer-coarse:py-2"
             >
               Delete
             </button>
-            <button onClick={() => setConfirmingDelete(false)} className="rounded-md border border-stone-700 px-2 py-0.5 text-stone-300 hover:bg-stone-800">
+            <button
+              onClick={() => setConfirmingDelete(false)}
+              className="rounded-md border border-stone-700 px-2 py-0.5 text-stone-300 hover:bg-stone-800 pointer-coarse:px-3 pointer-coarse:py-2"
+            >
               Keep
             </button>
           </span>
@@ -144,7 +150,7 @@ export function ChatView({ threadId, configured }: { threadId: number; configure
           <button
             onClick={() => setConfirmingDelete(true)}
             disabled={answer.running}
-            className="text-sm text-stone-500 hover:text-rose-300 disabled:opacity-50"
+            className="text-sm text-stone-500 hover:text-rose-300 disabled:opacity-50 pointer-coarse:py-2"
           >
             Delete
           </button>

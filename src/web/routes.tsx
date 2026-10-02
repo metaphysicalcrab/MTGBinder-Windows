@@ -1,4 +1,5 @@
 import { createBrowserRouter, Navigate } from 'react-router'
+import { AppError } from './components/AppError.tsx'
 import { Layout } from './components/Layout.tsx'
 import { BrainstormPage } from './pages/BrainstormPage.tsx'
 import { DeckEditorPage } from './pages/DeckEditorPage.tsx'
@@ -15,6 +16,7 @@ export const router = createBrowserRouter([
   {
     path: '/',
     element: <Layout />,
+    errorElement: <AppError />,
     children: [
       // Binder opens on Library (spec §5.7): Binder.app's first page, and old links to Look up, land there.
       { index: true, element: <Navigate to="/library" replace /> },

@@ -9,6 +9,10 @@ import { BOARD_LABEL, BOARD_ORDER, useDeckChange } from '../../lib/decks.ts'
 import { plural } from '../../lib/format.ts'
 import { ColorPips } from './ColorPips.tsx'
 
+/** The header's actions: on a phone, each a third of their line. */
+const action =
+  'flex-1 rounded-md border border-stone-700 px-3 py-1.5 text-sm text-stone-200 hover:bg-stone-800 sm:flex-initial pointer-coarse:py-2.5'
+
 interface DeckFields {
   name?: string
   format?: FormatId
@@ -74,14 +78,16 @@ export function DeckHeader({ deck, onShowWarnings }: { deck: DeckDetail; onShowW
               e.currentTarget.blur()
             }
           }}
-          className="min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1 font-serif text-3xl font-semibold text-stone-50 hover:border-stone-800 focus:border-stone-700 focus:outline-none"
+          autoCapitalize="words"
+          enterKeyHint="done"
+          className="min-w-0 flex-1 basis-full rounded-md border border-transparent bg-transparent px-1 font-serif text-2xl font-semibold text-stone-50 hover:border-stone-800 focus:border-stone-700 focus:outline-none sm:basis-0 sm:text-3xl"
         />
         {!empty && <ColorPips identity={deck.colorIdentity} className="text-lg" />}
         <select
           aria-label="Format"
           value={deck.format}
           onChange={(e) => save.mutate({ format: e.target.value as FormatId })}
-          className="rounded-md border border-stone-700 bg-stone-900 px-2 py-1.5 text-sm text-stone-100"
+          className="rounded-md border border-stone-700 bg-stone-900 px-2 py-1.5 text-sm text-stone-100 pointer-coarse:py-2.5"
         >
           {FORMAT_IDS.map((f) => (
             <option key={f} value={f}>
@@ -96,31 +102,29 @@ export function DeckHeader({ deck, onShowWarnings }: { deck: DeckDetail; onShowW
               role="radio"
               aria-checked={deck.status === s}
               onClick={() => setStatus(s)}
-              className={`rounded-md px-3 py-1 text-sm capitalize ${deck.status === s ? (s === 'built' ? 'bg-emerald-700 text-emerald-50' : 'bg-stone-700 text-stone-50') : 'text-stone-400 hover:text-stone-100'}`}
+              className={`rounded-md px-3 py-1 text-sm capitalize pointer-coarse:py-2 ${deck.status === s ? (s === 'built' ? 'bg-emerald-700 text-emerald-50' : 'bg-stone-700 text-stone-50') : 'text-stone-400 hover:text-stone-100'}`}
             >
               {s}
             </button>
           ))}
         </div>
-        <button
-          onClick={() => brainstorm.mutate(deck.id, { onSuccess: (thread) => navigate(`/brainstorm/${thread.id}`) })}
-          disabled={brainstorm.isPending}
-          className="rounded-md border border-stone-700 px-3 py-1.5 text-sm text-stone-200 hover:bg-stone-800 disabled:opacity-50"
-        >
-          Brainstorm with Claude
-        </button>
-        <button
-          onClick={() => navigate(`/scan?deck=${deck.id}`)}
-          className="rounded-md border border-stone-700 px-3 py-1.5 text-sm text-stone-200 hover:bg-stone-800"
-        >
-          Scan cards into this deck
-        </button>
-        <button
-          onClick={() => navigate(`/playtest?deck=${deck.id}`)}
-          className="rounded-md border border-stone-700 px-3 py-1.5 text-sm text-stone-200 hover:bg-stone-800"
-        >
-          Playtest
-        </button>
+        {/* On a phone, the three share a line of their own, in fewer words. */}
+        <div className="flex w-full gap-2 sm:contents">
+          <button
+            onClick={() => brainstorm.mutate(deck.id, { onSuccess: (thread) => navigate(`/brainstorm/${thread.id}`) })}
+            disabled={brainstorm.isPending}
+            className={`${action} disabled:opacity-50`}
+          >
+            Brainstorm<span className="max-sm:hidden"> with Claude</span>
+          </button>
+          <button onClick={() => navigate(`/scan?deck=${deck.id}`)} className={action}>
+            Scan <span className="max-sm:hidden">cards into this deck</span>
+            <span className="sm:hidden">cards</span>
+          </button>
+          <button onClick={() => navigate(`/playtest?deck=${deck.id}`)} className={action}>
+            Playtest
+          </button>
+        </div>
       </div>
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-stone-400">
         {BOARD_ORDER.filter((b) => deck.boards[b] > 0 || b === 'main').map((b) => (
@@ -142,7 +146,7 @@ export function DeckHeader({ deck, onShowWarnings }: { deck: DeckDetail; onShowW
           </span>
         )}
         {warnings > 0 && (
-          <button onClick={onShowWarnings} className="text-amber-300 hover:underline">
+          <button onClick={onShowWarnings} className="text-amber-300 hover:underline pointer-coarse:py-2">
             {plural(warnings, 'warning')}
           </button>
         )}
@@ -164,11 +168,14 @@ export function DeckHeader({ deck, onShowWarnings }: { deck: DeckDetail; onShowW
             <button
               onClick={() => save.mutate({ status: 'built' }, { onSuccess: () => setConfirmingBuilt(false) })}
               disabled={save.isPending}
-              className="rounded-md bg-amber-500 px-3 py-1 font-medium text-stone-950 hover:bg-amber-400 disabled:opacity-50"
+              className="rounded-md bg-amber-500 px-3 py-1 font-medium text-stone-950 hover:bg-amber-400 disabled:opacity-50 pointer-coarse:py-2.5"
             >
               {save.isPending ? 'Marking as built…' : 'Mark as built anyway'}
             </button>
-            <button onClick={() => setConfirmingBuilt(false)} className="rounded-md border border-stone-700 px-3 py-1 text-stone-300 hover:bg-stone-800">
+            <button
+              onClick={() => setConfirmingBuilt(false)}
+              className="rounded-md border border-stone-700 px-3 py-1 text-stone-300 hover:bg-stone-800 pointer-coarse:py-2.5"
+            >
               Cancel
             </button>
           </div>

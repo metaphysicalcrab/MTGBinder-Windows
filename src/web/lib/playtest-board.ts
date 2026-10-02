@@ -1,6 +1,7 @@
 import { clampPos } from '../../shared/playtest/placement.ts'
 import type { CardData, CardKind, CardState, Dest, Pos, SeatIndex } from '../../shared/playtest/types.ts'
 import type { FormatId } from '../../shared/types.ts'
+import { IS_MAC, isUndoKey } from './platform.ts'
 
 /** The playtest board's arithmetic (spec §5.9.3, §5.9.4), kept apart from React so it can be tested. */
 
@@ -152,11 +153,15 @@ export function counterTag(name: string, value: number): string {
 export type BoardKey = 'tap' | 'flip' | 'plus' | 'minus' | 'draw' | 'switch' | 'undo' | 'clear'
 
 /**
- * What a key does on the board (spec §5.9.4), or null. Cmd+Z undoes (the one with Cmd); the rest are bare keys, and
- * none follows a `g` (which starts going to another page).
+ * What a key does on the board (spec §5.9.4), or null. Undo is Cmd+Z on a Mac and Ctrl+Z elsewhere (isUndoKey, the one
+ * with a modifier); the rest are bare keys, and none follows a `g` (which starts going to another page).
  */
-export function boardKey(e: { key: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean }, afterG: boolean): BoardKey | null {
-  if (e.metaKey && !e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'z' && !e.shiftKey) return 'undo'
+export function boardKey(
+  e: { key: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean },
+  afterG: boolean,
+  mac = IS_MAC,
+): BoardKey | null {
+  if (isUndoKey(e, mac)) return 'undo'
   if (e.metaKey || e.ctrlKey || e.altKey || afterG) return null
   switch (e.key) {
     case 't':

@@ -32,7 +32,13 @@ const COLOR_MODES: Array<[ColorMode, string]> = [
 ]
 
 const input =
-  'w-full rounded-md border border-stone-700 bg-stone-900 px-2.5 py-1.5 text-sm text-stone-100 outline-none placeholder:text-stone-600 focus:border-amber-500/70 disabled:opacity-50'
+  'w-full rounded-md border border-stone-700 bg-stone-900 px-2.5 py-1.5 text-sm text-stone-100 outline-none placeholder:text-stone-600 focus:border-amber-500/70 disabled:opacity-50 pointer-coarse:py-2.5'
+
+/**
+ * A text field's keyboard on a phone: names, codes and rules words go into a search as typed, so no capitals,
+ * corrections or suggestions, and Enter says Search (it submits the search above).
+ */
+const searchKeyboard = { autoCapitalize: 'none', autoCorrect: 'off', autoComplete: 'off', spellCheck: false, enterKeyHint: 'search' } as const
 
 interface Props {
   form: AdvancedForm
@@ -61,13 +67,17 @@ export function AdvancedPanel({ form, scope, paused, onChange, onReset }: Props)
   const allTypes = types.data ? [...types.data.supertypes, ...types.data.types, ...types.data.subtypes] : []
 
   return (
-    <section className="rounded-xl border border-stone-800 bg-stone-900/40 p-5">
+    <section className="rounded-xl border border-stone-800 bg-stone-900/40 p-4 sm:p-5">
       <div className="mb-4 flex items-start justify-between gap-4">
         <div>
           <h2 className="font-semibold text-stone-100">Advanced search</h2>
           <p className="text-xs text-stone-500">Fill in any fields; they're added to the search text above.</p>
         </div>
-        <button type="button" onClick={onReset} className="rounded-md border border-stone-700 px-3 py-1 text-xs text-stone-300 hover:bg-stone-800">
+        <button
+          type="button"
+          onClick={onReset}
+          className="shrink-0 rounded-md border border-stone-700 px-3 py-1 text-xs text-stone-300 hover:bg-stone-800 pointer-coarse:py-2.5 pointer-coarse:text-sm"
+        >
           Reset form
         </button>
       </div>
@@ -78,10 +88,10 @@ export function AdvancedPanel({ form, scope, paused, onChange, onReset }: Props)
       )}
       <fieldset disabled={paused} className="grid gap-x-6 gap-y-4 md:grid-cols-2">
         <Field label="Name">
-          <input className={input} value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. bolt" />
+          <input className={input} {...searchKeyboard} value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. bolt" />
         </Field>
         <Field label="Rules text">
-          <input className={input} value={form.oracle} onChange={(e) => set('oracle', e.target.value)} placeholder="e.g. draw a card" />
+          <input className={input} {...searchKeyboard} value={form.oracle} onChange={(e) => set('oracle', e.target.value)} placeholder="e.g. draw a card" />
         </Field>
         <Field label="Types">
           <TypeChips types={form.types} listId={typeListId} onChange={(next) => set('types', next)} />
@@ -92,7 +102,7 @@ export function AdvancedPanel({ form, scope, paused, onChange, onReset }: Props)
           </datalist>
         </Field>
         <Field label="Mana cost">
-          <input className={input} value={form.mana} onChange={(e) => set('mana', e.target.value)} placeholder="e.g. {2}{W}{W} or 2WW" />
+          <input className={input} {...searchKeyboard} value={form.mana} onChange={(e) => set('mana', e.target.value)} placeholder="e.g. {2}{W}{W} or 2WW" />
         </Field>
         <Field label="Colors">
           <ColorPicker field={form.colors} onChange={(next) => set('colors', next)} />
@@ -117,12 +127,12 @@ export function AdvancedPanel({ form, scope, paused, onChange, onReset }: Props)
         <Field label="Rarity">
           <div className="flex flex-wrap gap-3 pt-1">
             {RARITIES.map((r) => (
-              <label key={r} className="flex items-center gap-1.5 text-sm text-stone-300 capitalize">
+              <label key={r} className="flex items-center gap-1.5 text-sm text-stone-300 capitalize pointer-coarse:min-h-10 pointer-coarse:gap-2">
                 <input
                   type="checkbox"
                   checked={form.rarities.includes(r)}
                   onChange={(e) => set('rarities', e.target.checked ? [...form.rarities, r] : form.rarities.filter((x) => x !== r))}
-                  className="accent-amber-500"
+                  className="accent-amber-500 pointer-coarse:size-5"
                 />
                 {r}
               </label>
@@ -130,7 +140,7 @@ export function AdvancedPanel({ form, scope, paused, onChange, onReset }: Props)
           </div>
         </Field>
         <Field label="Set">
-          <input className={input} list={setListId} value={form.set} onChange={(e) => set('set', e.target.value)} placeholder="Set code, e.g. dmu" />
+          <input className={input} {...searchKeyboard} list={setListId} value={form.set} onChange={(e) => set('set', e.target.value)} placeholder="Set code, e.g. dmu" />
           <datalist id={setListId}>
             {sets.data?.map((s) => (
               <option key={s.code} value={s.code}>
@@ -161,19 +171,20 @@ export function AdvancedPanel({ form, scope, paused, onChange, onReset }: Props)
           </div>
         </Field>
         <Field label="Artist">
-          <input className={input} value={form.artist} onChange={(e) => set('artist', e.target.value)} />
+          <input className={input} {...searchKeyboard} value={form.artist} onChange={(e) => set('artist', e.target.value)} />
         </Field>
         <Field label="Flavor text">
-          <input className={input} value={form.flavor} onChange={(e) => set('flavor', e.target.value)} />
+          <input className={input} {...searchKeyboard} value={form.flavor} onChange={(e) => set('flavor', e.target.value)} />
         </Field>
         <Field label="Keywords">
-          <input className={input} value={form.keywords} onChange={(e) => set('keywords', e.target.value)} placeholder="Comma-separated, e.g. flying, haste" />
+          <input className={input} {...searchKeyboard} value={form.keywords} onChange={(e) => set('keywords', e.target.value)} placeholder="Comma-separated, e.g. flying, haste" />
         </Field>
         {scope === 'library' && (
           <div className="grid gap-3 border-t border-stone-800 pt-4 md:col-span-2 md:grid-cols-4">
             <Field label="In deck">
               <input
                 className={input}
+                {...searchKeyboard}
                 list={`${setListId}-decks`}
                 value={form.inDeck}
                 onChange={(e) => set('inDeck', e.target.value)}
@@ -230,7 +241,7 @@ function NumberInput({ field, onChange }: { field: NumericField; onChange: (fiel
           </option>
         ))}
       </select>
-      <input className={input} inputMode="decimal" value={field.value} onChange={(e) => onChange({ ...field, value: e.target.value })} />
+      <input className={input} inputMode="decimal" enterKeyHint="search" value={field.value} onChange={(e) => onChange({ ...field, value: e.target.value })} />
     </div>
   )
 }
@@ -252,7 +263,7 @@ function ColorPicker({ field, onChange }: { field: ColorField; onChange: (field:
             aria-pressed={on}
             aria-label={{ W: 'White', U: 'Blue', B: 'Black', R: 'Red', G: 'Green', C: 'Colorless' }[letter]}
             onClick={() => toggle(letter)}
-            className={`rounded-full p-0.5 ring-2 transition ${on ? 'opacity-100 ring-amber-400' : 'opacity-40 ring-transparent hover:opacity-80'}`}
+            className={`rounded-full p-0.5 ring-2 transition pointer-coarse:p-2 ${on ? 'opacity-100 ring-amber-400' : 'opacity-40 ring-transparent hover:opacity-80'}`}
           >
             <img src={symbolUrl(letter)} alt="" className="size-6" />
           </button>
@@ -275,17 +286,25 @@ function ColorPicker({ field, onChange }: { field: ColorField; onChange: (field:
 
 function TypeChips({ types, listId, onChange }: { types: string[]; listId: string; onChange: (types: string[]) => void }) {
   const [draft, setDraft] = useState('')
-  const add = () => {
-    const value = draft.trim()
-    if (value !== '' && !types.includes(value)) onChange([...types, value])
-    setDraft('')
+  /** Adds each of the comma-separated values not already there, and keeps `rest` typed. */
+  const add = (text: string, rest = '') => {
+    const values = text.split(',').map((v) => v.trim())
+    const next = [...types]
+    for (const value of values) if (value !== '' && !next.includes(value)) next.push(value)
+    if (next.length > types.length) onChange(next)
+    setDraft(rest)
   }
   return (
     <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-stone-700 bg-stone-900 px-2 py-1">
       {types.map((t) => (
-        <span key={t} className="flex items-center gap-1 rounded bg-stone-700 px-1.5 py-0.5 text-xs text-stone-100">
+        <span key={t} className="flex items-center gap-1 rounded bg-stone-700 px-1.5 py-0.5 text-xs text-stone-100 pointer-coarse:text-sm">
           {t}
-          <button type="button" aria-label={`Remove ${t}`} onClick={() => onChange(types.filter((x) => x !== t))} className="text-stone-400 hover:text-stone-100">
+          <button
+            type="button"
+            aria-label={`Remove ${t}`}
+            onClick={() => onChange(types.filter((x) => x !== t))}
+            className="text-stone-400 hover:text-stone-100 pointer-coarse:-my-2 pointer-coarse:-mr-1.5 pointer-coarse:size-9 pointer-coarse:text-base"
+          >
             ×
           </button>
         </span>
@@ -293,19 +312,30 @@ function TypeChips({ types, listId, onChange }: { types: string[]; listId: strin
       <input
         list={listId}
         value={draft}
-        onChange={(e) => setDraft(e.target.value)}
+        // A comma ends a chip. Read from the text rather than the key: a phone's keyboard doesn't say which key it was
+        // (Gboard's keydown is "Unidentified"), and a paste can bring several.
+        onChange={(e) => {
+          const text = e.target.value
+          const comma = text.lastIndexOf(',')
+          if (comma === -1) setDraft(text)
+          else add(text.slice(0, comma), text.slice(comma + 1).trimStart())
+        }}
         onKeyDown={(e) => {
           // Enter adds a typed chip; in an empty Types input it falls through and submits the search.
-          if (e.key === ',' || (e.key === 'Enter' && draft.trim() !== '')) {
+          if (e.key === 'Enter' && draft.trim() !== '') {
             e.preventDefault()
-            add()
+            add(draft)
           } else if (e.key === 'Backspace' && draft === '' && types.length > 0) {
             onChange(types.slice(0, -1))
           }
         }}
-        onBlur={add}
+        onBlur={() => add(draft)}
+        autoCapitalize="none"
+        autoCorrect="off"
+        autoComplete="off"
+        spellCheck={false}
         placeholder={types.length === 0 ? 'e.g. Legendary, Creature, Elf' : ''}
-        className="min-w-24 flex-1 bg-transparent py-0.5 text-sm text-stone-100 outline-none placeholder:text-stone-600"
+        className="min-w-24 flex-1 bg-transparent py-0.5 text-sm text-stone-100 outline-none placeholder:text-stone-600 pointer-coarse:py-2"
       />
     </div>
   )

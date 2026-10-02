@@ -1,9 +1,24 @@
 import { Link } from 'react-router'
+import { PLATFORM, type Platform } from '../../lib/platform.ts'
 import { useBulkStatus } from '../../lib/use-bulk-status.ts'
 import { useOpenShortcuts } from '../ShortcutsDialog.tsx'
 
+/** How scanning goes, said for the computer or phone Binder is open on. */
+export function scanStepText(platform: Platform): string {
+  switch (platform) {
+    case 'mac':
+      return 'Hold each card under your iPhone or webcam; Binder reads it on this Mac.'
+    case 'windows':
+      return 'Hold each card under a webcam, or scan with your phone; Binder reads it on this PC.'
+    case 'android':
+      return "Photograph each card with this phone's camera; Binder reads it on your computer."
+    case 'other':
+      return 'Hold each card under a webcam; Binder reads it on this computer.'
+  }
+}
+
 const FIRST_STEPS: ReadonlyArray<{ to: string; state?: object; title: string; text: string }> = [
-  { to: '/scan', title: 'Scan your cards', text: 'Hold each card under your iPhone or webcam; Binder reads it on this Mac.' },
+  { to: '/scan', title: 'Scan your cards', text: scanStepText(PLATFORM) },
   {
     to: '/library',
     state: { importing: true },
@@ -41,8 +56,8 @@ export function GettingStarted() {
           </li>
         ))}
       </ol>
-      {/* A button as well as "press ?", for someone who hasn't met the shortcuts yet. */}
-      <p className="mt-4 text-xs text-stone-500">
+      {/* A button as well as "press ?", for someone who hasn't met the shortcuts yet; nothing for a finger, with no keys. */}
+      <p className="mt-4 text-xs text-stone-500 pointer-coarse:hidden">
         <button onClick={openShortcuts} className="text-amber-300 hover:underline">
           Keyboard shortcuts
         </button>{' '}

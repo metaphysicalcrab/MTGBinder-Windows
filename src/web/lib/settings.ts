@@ -3,7 +3,8 @@ import { useEffect } from 'react'
 import type { AiKeyStatus, BackupStatus, LibrarySize, Settings } from '../../shared/types.ts'
 import { apiGet, apiSend } from './api.ts'
 import { invalidateCollection } from './collection.ts'
-import { formatBytes } from './format.ts'
+import { formatBytes, megabyte } from './format.ts'
+import { IS_WINDOWS } from './platform.ts'
 import { useToast } from './toast.tsx'
 
 export function useSettings() {
@@ -89,13 +90,15 @@ const WORTH_COMPACTING = 10_000_000
 /**
  * What Settings → Library file says: the size (the file and its log, split out once the log holds 1 MB or more, so
  * the two figures aren't read as used and free) and the unused space inside the file, which compacting gives back.
+ * Sizes are counted as the computer's file manager counts them (formatBytes).
  */
-export function librarySizeText(size: LibrarySize): { size: string; unused: string; worthIt: boolean } {
-  const total = formatBytes(size.bytes + size.logBytes)
+export function librarySizeText(size: LibrarySize, windows = IS_WINDOWS): { size: string; unused: string; worthIt: boolean } {
+  const bytes = (n: number) => formatBytes(n, windows)
+  const total = bytes(size.bytes + size.logBytes)
   const worthIt = size.freeBytes >= WORTH_COMPACTING
   return {
-    size: size.logBytes >= 1_000_000 ? `${total} (${formatBytes(size.bytes)} library + ${formatBytes(size.logBytes)} log)` : total,
-    unused: worthIt ? `${formatBytes(size.freeBytes)} (Compact gives it back)` : 'Hardly any: nothing to compact',
+    size: size.logBytes >= megabyte(windows) ? `${total} (${bytes(size.bytes)} library + ${bytes(size.logBytes)} log)` : total,
+    unused: worthIt ? `${bytes(size.freeBytes)} (Compact gives it back)` : 'Hardly any: nothing to compact',
     worthIt,
   }
 }
@@ -108,8 +111,8 @@ interface Compacted {
 }
 
 /** The toast after compacting, with the sizes Settings shows: the file and its log together. */
-export function compactedToast({ before, after, backup }: Compacted): string {
-  const size = (s: LibrarySize) => formatBytes(s.bytes + s.logBytes)
+export function compactedToast({ before, after, backup }: Compacted, windows = IS_WINDOWS): string {
+  const size = (s: LibrarySize) => formatBytes(s.bytes + s.logBytes, windows)
   return `Compacted the library from ${size(before)} to ${size(after)}, after saving ${backup}.`
 }
 

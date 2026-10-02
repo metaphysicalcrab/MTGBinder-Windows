@@ -1,4 +1,5 @@
 import { TEXT_INPUT_TYPES } from './capture.ts'
+import { IS_MAC, undoKeyLabelFor } from './platform.ts'
 
 /** The pages `g` then a letter goes to, in the order the header (Layout's NAV) and the shortcuts list show them. */
 export const GO_TO: ReadonlyArray<{ key: string; path: string; label: string }> = [
@@ -15,21 +16,29 @@ export const GO_TO: ReadonlyArray<{ key: string; path: string; label: string }> 
 /** How long after `g` the page letter may come. */
 export const GO_TO_MS = 1500
 
-/** Every shortcut, for the list `?` opens: the keys, and what they do (`where` when only one page has it). */
-export const SHORTCUTS: ReadonlyArray<{ keys: string[]; does: string; where?: string }> = [
-  { keys: ['?'], does: 'Show these shortcuts' },
-  { keys: ['/'], does: 'Find a card by name' },
-  ...GO_TO.map((page) => ({ keys: ['g', page.key], does: `Go to ${page.label}` })),
-  { keys: ['Space'], does: 'Capture the card in the guide', where: 'Scan' },
-  { keys: ['a'], does: 'Switch between Auto and Manual capture', where: 'Scan' },
-  { keys: ['t'], does: 'Tap or untap the card under the pointer, or the selection', where: 'Playtest' },
-  { keys: ['f'], does: 'Flip the card under the pointer', where: 'Playtest' },
-  { keys: ['+', '-'], does: 'Add or remove a +1/+1 counter', where: 'Playtest' },
-  { keys: ['d'], does: 'Draw a card', where: 'Playtest' },
-  { keys: ['Tab'], does: 'Switch side', where: 'Playtest' },
-  { keys: ['⌘Z'], does: 'Undo', where: 'Playtest' },
-  { keys: ['Esc'], does: 'Close the card details or this list' },
-]
+/**
+ * Every shortcut, for the list `?` opens: the keys, and what they do (`where` when only one page has it). Undo is ⌘Z on
+ * a Mac and Ctrl+Z elsewhere.
+ */
+export function shortcutList(mac: boolean): ReadonlyArray<{ keys: string[]; does: string; where?: string }> {
+  return [
+    { keys: ['?'], does: 'Show these shortcuts' },
+    { keys: ['/'], does: 'Find a card by name' },
+    ...GO_TO.map((page) => ({ keys: ['g', page.key], does: `Go to ${page.label}` })),
+    { keys: ['Space'], does: 'Capture the card in the guide', where: 'Scan' },
+    { keys: ['a'], does: 'Switch between Auto and Manual capture', where: 'Scan' },
+    { keys: ['t'], does: 'Tap or untap the card under the pointer, or the selection', where: 'Playtest' },
+    { keys: ['f'], does: 'Flip the card under the pointer', where: 'Playtest' },
+    { keys: ['+', '-'], does: 'Add or remove a +1/+1 counter', where: 'Playtest' },
+    { keys: ['d'], does: 'Draw a card', where: 'Playtest' },
+    { keys: ['Tab'], does: 'Switch side', where: 'Playtest' },
+    { keys: [undoKeyLabelFor(mac)], does: 'Undo', where: 'Playtest' },
+    { keys: ['Esc'], does: 'Close the card details or this list' },
+  ]
+}
+
+/** The shortcuts on this computer. */
+export const SHORTCUTS = shortcutList(IS_MAC)
 
 /**
  * Whether keys pressed with focus on `target` type into it: a text-like input (a missing type is text), a textarea, a

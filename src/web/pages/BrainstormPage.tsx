@@ -32,7 +32,7 @@ function Start({ configured }: { configured: boolean }) {
                 key={example}
                 onClick={() => start(example)}
                 disabled={create.isPending}
-                className="rounded-full border border-stone-700 px-3 py-1 text-left text-sm text-stone-300 hover:bg-stone-800 disabled:opacity-50"
+                className="rounded-full border border-stone-700 px-3 py-1 text-left text-sm text-stone-300 hover:bg-stone-800 disabled:opacity-50 pointer-coarse:py-2"
               >
                 {example}
               </button>
@@ -52,21 +52,33 @@ function Start({ configured }: { configured: boolean }) {
   )
 }
 
-/** Brainstorm with Claude (spec §5.5): the conversations on the left, the open one on the right. */
+/**
+ * Brainstorm with Claude (spec §5.5): the conversations on the left, the open one on the right. Below lg (a phone, a
+ * portrait tablet) there's room for one: a conversation shows alone, with a link back to the list, and the start page
+ * puts its box above the list.
+ */
 export function BrainstormPage() {
   const param = useParams().threadId
   const threadId = param === undefined ? null : Number(param)
   const { data: key } = useAiKey()
   const configured = key?.configured ?? true
+  const open = threadId !== null && Number.isInteger(threadId)
   return (
     <div className="space-y-6">
       <h1 className="font-serif text-3xl font-semibold text-stone-50">Brainstorm</h1>
       <div className="grid gap-8 lg:grid-cols-[15rem_minmax(0,1fr)]">
-        <ThreadList />
-        {threadId === null || !Number.isInteger(threadId) ? (
-          <Start configured={configured} />
+        <div className={open ? 'hidden lg:block' : 'order-1 lg:order-none'}>
+          <ThreadList />
+        </div>
+        {open ? (
+          <div className="min-w-0 space-y-3">
+            <Link to="/brainstorm" className="inline-block py-2 text-sm text-stone-400 hover:text-stone-100 lg:hidden">
+              ← Conversations
+            </Link>
+            <ChatView key={threadId} threadId={threadId} configured={configured} />
+          </div>
         ) : (
-          <ChatView key={threadId} threadId={threadId} configured={configured} />
+          <Start configured={configured} />
         )}
       </div>
     </div>

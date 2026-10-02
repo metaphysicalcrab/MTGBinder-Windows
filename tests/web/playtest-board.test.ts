@@ -185,14 +185,30 @@ describe('the board', () => {
   })
 
   it("reads the board's keys, and none right after a g", () => {
-    expect(boardKey(key('t'), false)).toBe('tap')
-    expect(boardKey(key('='), false)).toBe('plus')
-    expect(boardKey(key('Tab'), false)).toBe('switch')
-    expect(boardKey(key('Tab', { shiftKey: true }), false)).toBeNull()
-    expect(boardKey(key('z', { metaKey: true }), false)).toBe('undo')
-    expect(boardKey(key('z', { metaKey: true, shiftKey: true }), false)).toBeNull()
-    expect(boardKey(key('d', { ctrlKey: true }), false)).toBeNull()
-    expect(boardKey(key('d'), true)).toBeNull()
-    expect(boardKey(key('x'), false)).toBeNull()
+    for (const mac of [true, false]) {
+      expect(boardKey(key('t'), false, mac)).toBe('tap')
+      expect(boardKey(key('='), false, mac)).toBe('plus')
+      expect(boardKey(key('Tab'), false, mac)).toBe('switch')
+      expect(boardKey(key('Tab', { shiftKey: true }), false, mac)).toBeNull()
+      expect(boardKey(key('d', { ctrlKey: true }), false, mac)).toBeNull()
+      expect(boardKey(key('d', { metaKey: true }), false, mac)).toBeNull()
+      expect(boardKey(key('d'), true, mac)).toBeNull()
+      expect(boardKey(key('x'), false, mac)).toBeNull()
+    }
+  })
+
+  it('undoes with Cmd+Z on a Mac and Ctrl+Z on Windows, never with Shift', () => {
+    expect(boardKey(key('z', { metaKey: true }), false, true)).toBe('undo')
+    expect(boardKey(key('Z', { metaKey: true }), false, true)).toBe('undo')
+    expect(boardKey(key('z', { metaKey: true, shiftKey: true }), false, true)).toBeNull()
+    // Control-Z isn't undo on a Mac (Control-click is its right-click; Control-letter types in some fields).
+    expect(boardKey(key('z', { ctrlKey: true }), false, true)).toBeNull()
+    expect(boardKey(key('z', { ctrlKey: true }), false, false)).toBe('undo')
+    expect(boardKey(key('z', { ctrlKey: true, shiftKey: true }), false, false)).toBeNull()
+    expect(boardKey(key('z', { ctrlKey: true, altKey: true }), false, false)).toBeNull()
+    // The Windows key with Z is Windows' own.
+    expect(boardKey(key('z', { metaKey: true }), false, false)).toBeNull()
+    // Undo works right after a g too: it's no page letter.
+    expect(boardKey(key('z', { ctrlKey: true }), true, false)).toBe('undo')
   })
 })

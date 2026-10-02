@@ -6,8 +6,11 @@ import { CardDataNotice } from '../components/library/CardDataNotice.tsx'
 import { ImportPanel } from '../components/library/ImportPanel.tsx'
 import { apiGet } from '../lib/api.ts'
 import { formatDate, formatUsd } from '../lib/format.ts'
+import { IS_WINDOWS } from '../lib/platform.ts'
 import { readSearchState, writeSearchState } from '../lib/search-state.ts'
 import { SearchView } from './SearchPage.tsx'
+
+const action = 'rounded-md border border-stone-700 px-3 py-1.5 text-sm text-stone-200 hover:bg-stone-800 pointer-coarse:py-2.5'
 
 /**
  * My library, where Binder opens: totals, CSV import and export, and search locked to the collection (spec §5.2, §5.3).
@@ -44,21 +47,24 @@ export function LibraryPage() {
             <p className="text-sm text-stone-500">…</p>
           )}
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setImporting(true)}
-            disabled={importing}
-            className="rounded-md border border-stone-700 px-3 py-1.5 text-sm text-stone-200 hover:bg-stone-800 disabled:opacity-50"
-          >
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => setImporting(true)} disabled={importing} className={`${action} disabled:opacity-50`}>
             Import CSV
           </button>
-          <a
-            href="/api/collection/export.csv"
-            download
-            className="rounded-md border border-stone-700 px-3 py-1.5 text-sm text-stone-200 hover:bg-stone-800"
-          >
+          <a href="/api/collection/export.csv" download className={action}>
             Export CSV
           </a>
+          {/* Excel on Windows reads a CSV without a byte order mark as Windows-1252, garbling accented names. */}
+          {IS_WINDOWS && (
+            <a
+              href="/api/collection/export.csv?excel=1"
+              download
+              title="The same CSV, marked as UTF-8 so Excel shows accented names as they are"
+              className={action}
+            >
+              Export for Excel
+            </a>
+          )}
         </div>
       </div>
       <CardDataNotice />

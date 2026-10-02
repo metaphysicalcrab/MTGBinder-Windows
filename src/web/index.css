@@ -16,8 +16,52 @@
 
 :root {
   color-scheme: dark;
+  /* The bottom tab bar's height (Layout, below lg): its 3.5 rem tabs and the line above them. */
+  --nav-height: calc(3.5rem + 1px);
 }
 
 body {
   @apply bg-stone-950 text-stone-200 antialiased;
+}
+
+/*
+ * Touch (M13). A tap doesn't flash the browser's grey highlight (the press shows as below instead), and controls answer
+ * a tap at once, rather than waiting to see whether it's the start of a double-tap zoom.
+ */
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:where(a, button, input, select, textarea, label, summary, [role="button"], [role="tab"], [role="radio"]) {
+  touch-action: manipulation;
+}
+
+/* Tailwind's hover: styles wait for a pointer that hovers, so a finger sees its press as a light wash on the control. */
+@media (hover: none) {
+  :where(a[href], button:not(:disabled), summary, label:has(> input[type="file"]:not(:disabled))):active {
+    background-image: linear-gradient(rgb(255 255 255 / 0.08), rgb(255 255 255 / 0.08));
+  }
+}
+
+/* A dialog's scrolling stays in the dialog, rather than carrying on into the page behind it once it reaches its end. */
+[aria-modal="true"] {
+  overscroll-behavior: contain;
+}
+
+/* Below lg, what the page brings into view (a conversation's end, a focused field) comes to rest above the tab bar. */
+@media (width < 64rem) {
+  html {
+    scroll-padding-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom));
+  }
+}
+
+/*
+ * Room for the bottom tab bar, which shows below lg: its height and the phone's own inset under it. Layout pads the
+ * page with it; a bar fixed or stuck to the bottom of the window pads itself with it to sit above the tabs.
+ */
+@utility pb-nav {
+  padding-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom));
+  @variant lg {
+    padding-bottom: 0;
+  }
 }

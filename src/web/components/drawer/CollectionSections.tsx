@@ -8,7 +8,7 @@ import { sectionHeading } from './styles.ts'
 const FINISH_LABEL: Record<Finish, string> = { nonfoil: 'Nonfoil', foil: 'Foil', etched: 'Etched' }
 
 const stepButton =
-  'size-7 rounded-md border border-stone-700 text-stone-200 hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40'
+  'size-7 rounded-md border border-stone-700 text-stone-200 hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40 pointer-coarse:size-10 pointer-coarse:text-lg'
 
 /** "Own 3 · 1 free", or "Own 1 · 3 short" when built decks claim more copies than I own (as the search badge says). */
 function OwnershipLine({ ownership }: { ownership: Ownership }) {
@@ -42,10 +42,11 @@ export function YourCopies({ detail, onSelectPrinting }: { detail: CardDetail; o
             const label = `${copy.setCode.toUpperCase()} #${copy.collectorNumber} ${copy.finish}`
             const canAdd = finishesById.get(copy.cardId)?.includes(copy.finish) ?? false
             return (
-              <li key={`${copy.cardId}-${copy.finish}`} className="flex items-center gap-3 px-3 py-2 text-sm">
+              // Below sm, two lines: the printing, then its price and the stepper, so the name has the row's width.
+              <li key={`${copy.cardId}-${copy.finish}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm sm:flex-nowrap">
                 <button
                   onClick={() => onSelectPrinting(copy.cardId)}
-                  className="w-12 shrink-0 text-left font-mono text-xs text-stone-400 uppercase hover:text-amber-300"
+                  className="w-12 shrink-0 text-left font-mono text-xs text-stone-400 uppercase hover:text-amber-300 pointer-coarse:py-2"
                 >
                   {copy.setCode}
                 </button>
@@ -53,25 +54,27 @@ export function YourCopies({ detail, onSelectPrinting }: { detail: CardDetail; o
                   {copy.setName} <span className="text-stone-500">#{copy.collectorNumber}</span>
                 </span>
                 {copy.finish !== 'nonfoil' && <span className="shrink-0 text-xs text-amber-300">{FINISH_LABEL[copy.finish]}</span>}
-                <span className="w-16 shrink-0 text-right text-stone-300 tabular-nums">{formatUsd(copy.priceUsd)}</span>
-                <span className="flex shrink-0 items-center gap-1.5">
-                  <button
-                    aria-label={`Remove one ${label}`}
-                    onClick={() => adjust.mutate({ cardId: copy.cardId, finish: copy.finish, delta: -1 })}
-                    className={stepButton}
-                  >
-                    −
-                  </button>
-                  <span className="w-6 text-center text-stone-100 tabular-nums">{copy.quantity}</span>
-                  <button
-                    aria-label={`Add one ${label}`}
-                    disabled={!canAdd}
-                    title={canAdd ? undefined : `This printing no longer comes in ${copy.finish}`}
-                    onClick={() => adjust.mutate({ cardId: copy.cardId, finish: copy.finish, delta: 1 })}
-                    className={stepButton}
-                  >
-                    +
-                  </button>
+                <span className="flex basis-full items-center justify-end gap-3 sm:contents">
+                  <span className="w-16 shrink-0 text-right text-stone-300 tabular-nums">{formatUsd(copy.priceUsd)}</span>
+                  <span className="flex shrink-0 items-center gap-1.5 pointer-coarse:gap-3">
+                    <button
+                      aria-label={`Remove one ${label}`}
+                      onClick={() => adjust.mutate({ cardId: copy.cardId, finish: copy.finish, delta: -1 })}
+                      className={stepButton}
+                    >
+                      −
+                    </button>
+                    <span className="w-6 text-center text-stone-100 tabular-nums">{copy.quantity}</span>
+                    <button
+                      aria-label={`Add one ${label}`}
+                      disabled={!canAdd}
+                      title={canAdd ? undefined : `This printing no longer comes in ${copy.finish}`}
+                      onClick={() => adjust.mutate({ cardId: copy.cardId, finish: copy.finish, delta: 1 })}
+                      className={stepButton}
+                    >
+                      +
+                    </button>
+                  </span>
                 </span>
               </li>
             )
@@ -119,7 +122,7 @@ export function AddCopy({ card, printings }: { card: Card; printings: Printing[]
           aria-label="Printing"
           value={printing.id}
           onChange={(e) => setPrintingId(e.target.value)}
-          className="min-w-0 flex-1 rounded-md border border-stone-700 bg-stone-900 px-2 py-1.5 text-sm text-stone-100"
+          className="min-w-0 flex-1 rounded-md border border-stone-700 bg-stone-900 px-2 py-1.5 text-sm text-stone-100 pointer-coarse:py-2.5"
         >
           {printings.map((p) => (
             <option key={p.id} value={p.id}>
@@ -131,7 +134,7 @@ export function AddCopy({ card, printings }: { card: Card; printings: Printing[]
           aria-label="Finish"
           value={chosenFinish}
           onChange={(e) => setFinish(e.target.value as Finish)}
-          className="rounded-md border border-stone-700 bg-stone-900 px-2 py-1.5 text-sm text-stone-100"
+          className="rounded-md border border-stone-700 bg-stone-900 px-2 py-1.5 text-sm text-stone-100 pointer-coarse:py-2.5"
         >
           {finishes.map((f) => (
             <option key={f} value={f}>
@@ -142,7 +145,7 @@ export function AddCopy({ card, printings }: { card: Card; printings: Printing[]
         <button
           onClick={add}
           disabled={adjust.isPending}
-          className="rounded-md bg-amber-500 px-3 py-1.5 text-sm font-medium text-stone-950 hover:bg-amber-400 disabled:opacity-50"
+          className="rounded-md bg-amber-500 px-3 py-1.5 text-sm font-medium text-stone-950 hover:bg-amber-400 disabled:opacity-50 pointer-coarse:py-2.5"
         >
           Add copy
         </button>

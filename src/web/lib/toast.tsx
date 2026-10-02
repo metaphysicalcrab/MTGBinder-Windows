@@ -20,7 +20,10 @@ const DURATION_MS: Record<Tone, number> = { success: 4000, error: 8000 }
 /** Toasts shown at once; older ones make way. */
 const MAX_TOASTS = 4
 
-/** Brief messages about changes (spec §6: toasts for mutations), stacked in the bottom-right corner. */
+/**
+ * Brief messages about changes (spec §6: toasts for mutations), stacked in the bottom-right corner; below lg, above the
+ * bottom tab bar, and across the width of a phone.
+ */
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([])
   const nextId = useRef(0)
@@ -40,7 +43,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext value={api}>
       {children}
-      <div aria-live="polite" className="pointer-events-none fixed right-4 bottom-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
+      <div
+        aria-live="polite"
+        className="pointer-events-none fixed inset-x-4 bottom-[calc(var(--nav-height)+env(safe-area-inset-bottom)+0.75rem)] z-50 flex flex-col gap-2 sm:left-auto sm:w-80 sm:max-w-[calc(100vw-2rem)] lg:bottom-4"
+      >
         {toasts.map((toast) => (
           <div
             key={toast.id}
@@ -53,7 +59,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <button
               onClick={() => dismiss(toast.id)}
               aria-label="Dismiss"
-              className="-mr-1 rounded px-1 text-stone-400 hover:bg-stone-800 hover:text-stone-100"
+              className="-mr-1 rounded px-1 text-stone-400 hover:bg-stone-800 hover:text-stone-100 pointer-coarse:-my-2.5 pointer-coarse:-mr-2.5 pointer-coarse:size-10 pointer-coarse:px-0"
             >
               ✕
             </button>

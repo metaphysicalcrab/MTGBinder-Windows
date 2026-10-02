@@ -32,7 +32,7 @@ export function SetPage() {
     setParams(missing ? { show: 'missing' } : {}, { replace: true, state: location.state })
 
   const backLink = (
-    <Link to={back} className="text-sm text-stone-400 hover:text-stone-100">
+    <Link to={back} className="text-sm text-stone-400 hover:text-stone-100 pointer-coarse:inline-block pointer-coarse:py-2">
       ← Sets
     </Link>
   )
@@ -59,7 +59,7 @@ export function SetPage() {
   const shown = missingOnly ? missing : set.cards
   const type = setTypeLabel(set.setType)
   const tab = (active: boolean) =>
-    `rounded-md px-3 py-1.5 ${active ? 'bg-stone-700 text-stone-50' : 'text-stone-400 hover:text-stone-100'}`
+    `rounded-md px-3 py-1.5 pointer-coarse:py-2.5 ${active ? 'bg-stone-700 text-stone-50' : 'text-stone-400 hover:text-stone-100'}`
 
   return (
     <div className="space-y-5">
@@ -93,7 +93,13 @@ export function SetPage() {
   )
 }
 
-/** The set's cards as a table; the whole set at once, without pages (The List's 5,258 cards too). */
+/** A row's cells: a finger's height on a touch screen. */
+const cell = 'px-3 py-2 pointer-coarse:py-3'
+
+/**
+ * The set's cards as a table; the whole set at once, without pages (The List's 5,258 cards too). Below sm (a phone)
+ * it fits the screen, the rarity a letter by the name instead of a column.
+ */
 function CardList({ cards }: { cards: readonly SetCard[] }) {
   // The drawer's value changes with the card it shows, so this re-renders on every open and close. The rows depend
   // only on the cards and the stable `open`, so they're kept, rather than re-rendering thousands of them each time.
@@ -104,15 +110,20 @@ function CardList({ cards }: { cards: readonly SetCard[] }) {
         const owned = card.copies > 0
         return (
           <tr key={card.cardId} onClick={() => open(card.cardId)} className="cursor-pointer hover:bg-stone-900">
-            <td className={`px-3 py-2 font-mono text-xs ${owned ? 'text-stone-400' : 'text-stone-600'}`}>{card.collectorNumber}</td>
-            <td className="px-3 py-2">
+            <td className={`${cell} font-mono text-xs ${owned ? 'text-stone-400' : 'text-stone-600'}`}>{card.collectorNumber}</td>
+            <td className={cell}>
               <div className={`flex items-center gap-2 ${owned ? '' : 'opacity-45'}`}>
                 <span className="text-stone-100">{card.name}</span>
                 <ManaText text={card.manaCost} className="shrink-0 text-xs" />
+                {/* Below sm the rarity has no column: its letter goes by the name. */}
+                <span className="text-xs text-stone-500 sm:hidden">
+                  <span aria-hidden>{card.rarity.charAt(0).toUpperCase()}</span>
+                  <span className="sr-only">{card.rarity}</span>
+                </span>
               </div>
             </td>
-            <td className={`px-3 py-2 capitalize ${owned ? 'text-stone-400' : 'text-stone-600'}`}>{card.rarity}</td>
-            <td className="px-3 py-2 text-right tabular-nums">
+            <td className={`${cell} hidden capitalize sm:table-cell ${owned ? 'text-stone-400' : 'text-stone-600'}`}>{card.rarity}</td>
+            <td className={`${cell} text-right tabular-nums`}>
               {owned ? <span className="text-emerald-300">✓ {card.copies}</span> : <span className="text-stone-600">missing</span>}
             </td>
           </tr>
@@ -122,12 +133,12 @@ function CardList({ cards }: { cards: readonly SetCard[] }) {
   )
   return (
     <div className="overflow-x-auto rounded-lg border border-stone-800">
-      <table className="w-full min-w-[32rem] text-left text-sm">
+      <table className="w-full text-left text-sm sm:min-w-[32rem]">
         <thead className="bg-stone-900/80 text-xs tracking-wide text-stone-400 uppercase">
           <tr>
-            <th className="w-20 px-3 py-2 font-medium">#</th>
+            <th className="w-14 px-3 py-2 font-medium sm:w-20">#</th>
             <th className="px-3 py-2 font-medium">Card</th>
-            <th className="px-3 py-2 font-medium">Rarity</th>
+            <th className="hidden px-3 py-2 font-medium sm:table-cell">Rarity</th>
             <th className="px-3 py-2 text-right font-medium">Copies</th>
           </tr>
         </thead>
