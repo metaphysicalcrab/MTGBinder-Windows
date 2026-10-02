@@ -229,6 +229,28 @@ export const TABLE_MIN_SCREEN_HEIGHT = 500
 /** Where a finger's table doesn't fit (M13): a window narrower than a tablet's, or a phone's screen either way up. */
 export const SMALL_SCREEN_QUERY = `(width < ${TABLE_MIN_WIDTH}px), (device-height < ${TABLE_MIN_SCREEN_HEIGHT}px)`
 
+/**
+ * A tablet's screen (M13): 600 px or more both ways, as Android tells a tablet from a phone, whose screen is 360–430
+ * px across. Held upright, its window can be narrower than the table (a Galaxy Tab S4's is 712 px), but on its side
+ * it's wide enough.
+ */
+export const TABLET_SCREEN_QUERY = '(device-width >= 600px) and (device-height >= 600px)'
+
+/** A screen held upright: taller than it's wide, whatever the window's shape (an app beside Binder narrows the window). */
+export const UPRIGHT_SCREEN_QUERY = '(device-aspect-ratio < 1)'
+
+/**
+ * What the Playtest page says where a finger's table doesn't fit (SMALL_SCREEN_QUERY): on a tablet held upright, to
+ * turn it on its side; on a tablet on its side, whose window another app shares, to give Binder the whole screen; on a
+ * phone, that it needs a tablet or the PC.
+ */
+export function smallScreenText(screen: { tablet: boolean; upright: boolean }): string {
+  if (!screen.tablet) return 'Playtest needs a bigger screen: a tablet or the PC.'
+  return screen.upright
+    ? 'Playtest needs a wider screen: turn the tablet on its side.'
+    : 'Playtest needs a wider window: give Binder the whole screen.'
+}
+
 export type BoardKey = 'tap' | 'flip' | 'plus' | 'minus' | 'draw' | 'switch' | 'undo' | 'clear'
 
 /**

@@ -1,7 +1,7 @@
 import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useReducer, useRef } from 'react'
 import type { ApiErrorBody, ChatEvent, ChatItem, ThreadDetail, ThreadSummary } from '../../shared/types.ts'
-import { apiGet, apiSend, ApiRequestError } from './api.ts'
+import { apiFetch, apiGet, apiSend, ApiRequestError } from './api.ts'
 import { apiSignal, reportApiError } from './client.ts'
 import { invalidateCollection } from './collection.ts'
 import { useToast } from './toast.tsx'
@@ -189,7 +189,7 @@ export const asSentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${
 
 /** POSTs to an answer route and passes each server-sent event on. An error before the stream opens throws. */
 async function streamAnswer(path: string, body: unknown, onEvent: (event: ChatEvent) => void, signal: AbortSignal): Promise<void> {
-  const res = await fetch(path, {
+  const res = await apiFetch(path, {
     method: 'POST',
     headers: body === undefined ? {} : { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),

@@ -5,12 +5,12 @@ import {
   askAgainIn,
   clientFromAnswer,
   clientOnFailure,
-  isThisComputersHostname,
   pairingKeyIn,
   reportApiError,
   reportForgotten,
   watchApiSignals,
 } from '../../src/web/lib/client.ts'
+import { isThisComputersHostname } from '../../src/web/lib/platform.ts'
 
 describe('the gate (spec §5.10)', () => {
   it('shows the app to the PC and a paired phone, and only the pairing page to a phone that is not paired', () => {

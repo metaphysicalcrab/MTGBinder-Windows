@@ -8,9 +8,12 @@ import {
   movedFar,
   type Press,
   SMALL_SCREEN_QUERY,
+  smallScreenText,
   TABLE_MIN_SCREEN_HEIGHT,
   TABLE_MIN_WIDTH,
+  TABLET_SCREEN_QUERY,
   tapAction,
+  UPRIGHT_SCREEN_QUERY,
 } from '../../src/web/lib/playtest-board.ts'
 
 // A press on the table by a mouse, a finger, or a pen (M13): when it's a drag, when holding it opens a menu, and what
@@ -104,5 +107,17 @@ describe('a press on the playtest table', () => {
     expect(TABLE_MIN_SCREEN_HEIGHT).toBeLessThanOrEqual(600)
     // The screen's height, not the window's, which a tablet's keyboard shortens; either one too small is enough.
     expect(SMALL_SCREEN_QUERY).toBe(`(width < 768px), (device-height < ${TABLE_MIN_SCREEN_HEIGHT}px)`)
+  })
+
+  it('tells a tablet how to make room for the table, and a phone that it needs a tablet', () => {
+    // A tablet's screen is 600 px or more either way, a phone's 360–430 across; upright goes by the screen, not the window.
+    expect(TABLET_SCREEN_QUERY).toBe('(device-width >= 600px) and (device-height >= 600px)')
+    expect(UPRIGHT_SCREEN_QUERY).toBe('(device-aspect-ratio < 1)')
+    // A Galaxy Tab S4 upright (712 px wide), and on its side with another app beside Binder.
+    expect(smallScreenText({ tablet: true, upright: true })).toBe('Playtest needs a wider screen: turn the tablet on its side.')
+    expect(smallScreenText({ tablet: true, upright: false })).toBe('Playtest needs a wider window: give Binder the whole screen.')
+    for (const upright of [true, false]) {
+      expect(smallScreenText({ tablet: false, upright })).toBe('Playtest needs a bigger screen: a tablet or the PC.')
+    }
   })
 })

@@ -1,13 +1,12 @@
 import { useRef, useState } from 'react'
 import { kindOf } from '../../../shared/playtest/placement.ts'
 import type { CardData, Dest, GameState, SeatIndex } from '../../../shared/playtest/types.ts'
-import { useCoarsePointer } from '../../lib/platform.ts'
+import { useCoarsePointer, useMediaQuery } from '../../lib/platform.ts'
 import { tokenName } from '../../lib/playtest-board.ts'
 import { useTokenSearch } from '../../lib/playtest.ts'
 import { useDebounced } from '../../lib/use-debounced.ts'
 import { CardView } from './CardView.tsx'
 import { Modal } from './Menu.tsx'
-import { useMediaQuery } from './use-media-query.ts'
 
 /** The playtest's dialogs (spec §5.9.4, §5.9.5, §5.9.8). A finger's buttons and fields are taller (M13). */
 
