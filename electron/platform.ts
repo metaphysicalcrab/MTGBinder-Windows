@@ -3,6 +3,7 @@
 // platform's choices are checked on any computer; main.ts applies them.
 import path from 'node:path'
 import type { MenuItemConstructorOptions } from 'electron'
+import type { LanSummary } from '../src/shared/types.ts'
 
 /**
  * The app's ID on Windows (package.json's build.appId): the installer stamps its Start menu shortcut with it, and the
@@ -75,6 +76,53 @@ export function trayIcon(platform: NodeJS.Platform, appRoot: string): { file: st
   const icons = join(appRoot, 'build', 'icons')
   if (platform === 'darwin') return { file: join(icons, 'trayTemplate.png'), template: true }
   return { file: join(icons, platform === 'win32' ? 'tray.ico' : 'tray.png'), template: false }
+}
+
+/** What the tray icon's menu does. */
+export interface TrayActions {
+  open(): void
+  /** Turns phone access on or off. */
+  phoneAccess(enabled: boolean): void
+  /** Opens Binder's window on Settings → Phone access. */
+  phoneSettings(): void
+  quit(): void
+}
+
+/** The address a phone opens while Binder listens for phones (the chosen one), else null. */
+const phoneUrl = (lan: LanSummary | null) => (lan?.listening ? (lan.urls[0] ?? null) : null)
+
+/**
+ * The tray icon's menu, the same on every platform: Open Binder; Phone access, a checkbox that turns it on or off, the
+ * address phones open beneath it while Binder listens for them (or why it can't), and Phone access… for its settings;
+ * then Quit Binder. The phone items wait for the server to be ready (`lan` is what it last said of phone access).
+ */
+export function trayMenuTemplate(
+  state: { ready: boolean; lan: LanSummary | null },
+  actions: TrayActions,
+): MenuItemConstructorOptions[] {
+  const { ready, lan } = state
+  const on = lan?.enabled ?? false
+  const url = phoneUrl(lan)
+  const line = url
+    ? `Phones: ${url}`
+    : lan?.listening
+      ? "Phones: this PC isn't on a network a phone can reach"
+      : (lan?.error ?? null)
+  return [
+    { label: 'Open Binder', click: actions.open },
+    { type: 'separator' },
+    { label: 'Phone access', type: 'checkbox', checked: on, enabled: ready, click: () => actions.phoneAccess(!on) },
+    ...(ready && line ? [{ label: line, enabled: false }] : []),
+    { label: 'Phone access…', enabled: ready, click: actions.phoneSettings },
+    { type: 'separator' },
+    { label: 'Quit Binder', click: actions.quit },
+  ]
+}
+
+/** The tray icon's tooltip: Binder, and the address phones open while it listens for them. */
+export function trayToolTip(lan: LanSummary | null): string {
+  const url = phoneUrl(lan)
+  return url ? `Binder · phones: ${url}` : 'Binder'
 }
 
 /**

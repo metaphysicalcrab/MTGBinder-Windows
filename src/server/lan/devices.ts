@@ -57,6 +57,8 @@ interface DeviceRow {
   created_at: string
   last_seen_at: string | null
   last_ip: string | null
+  /** The page it paired from: `http://192.168.1.5:4322`, or `https://…:4323`. */
+  origin: string
 }
 
 const toDevice = (row: DeviceRow): LanDevice => ({
@@ -65,6 +67,7 @@ const toDevice = (row: DeviceRow): LanDevice => ({
   createdAt: row.created_at,
   lastSeenAt: row.last_seen_at,
   lastIp: row.last_ip,
+  https: row.origin.startsWith('https:'),
 })
 
 /**

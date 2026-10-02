@@ -13,9 +13,11 @@ import {
   type Client,
 } from '../http.ts'
 import { isLoopback, plainAddress, type AddressBook } from './addresses.ts'
-import { readDeviceCookie, setDeviceCookie } from './cookie.ts'
+import type { HttpsSetup } from './controller.ts'
+import { isHttps, readDeviceCookie, setDeviceCookie } from './cookie.ts'
 import type { DeviceStore } from './devices.ts'
 import type { RateLimiter } from './rate-limit.ts'
+import { phoneSetupPage } from './setup-page.ts'
 
 /**
  * Who may call each API route from a phone (spec §5.10): anyone on the network (`public`, rate-limited), a paired
@@ -42,6 +44,7 @@ const POLICIES: Record<Policy, string[]> = {
     'PATCH /api/lan/devices/:id',
     'DELETE /api/lan/devices/:id',
     'POST /api/lan/forget-all',
+    'POST /api/lan/https/rotate',
   ],
   // Anyone: whether Binder is there, who's asking (the pairing page), and pairing.
   public: ['GET /api/health', 'GET /api/lan/me', 'POST /api/lan/pair'],
@@ -205,6 +208,38 @@ export interface LanGuard {
   url(): string | null
   /** Whether Binder listens for phones: a phone's request through the dev server's proxy is let in only then. */
   listening(): boolean
+  /** HTTPS, which the phones' HTTP port sends phones to while it's on, and offers the certificate for. */
+  httpsSetup(): HttpsSetup
+}
+
+/**
+ * What the phones' listener answers itself (spec §5.10), to any phone on the network:
+ * - `/phone-setup`, how to install Binder's certificate authority for HTTPS, and `/binder-ca.crt`, the authority;
+ * - while Binder takes HTTPS, a request to the HTTP port is sent there: a page to the same address over HTTPS (302),
+ *   anything else, the API among it, refused with 403 `use_https`.
+ * Null for a request the app answers.
+ */
+function phonesOwn(c: Context<AppEnv>, hostname: string, https: HttpsSetup): Response | null {
+  const read = c.req.method === 'GET' || c.req.method === 'HEAD'
+  if (read && c.req.path === '/phone-setup') {
+    const authority = https.authority && { name: https.authority.caName, fingerprint: https.authority.caFingerprint }
+    return c.html(phoneSetupPage({ hostname, on: https.on, port: https.port, authority }))
+  }
+  if (read && c.req.path === '/binder-ca.crt') {
+    if (!https.authority) return c.text('HTTPS for phones is off', 404)
+    return c.body(Uint8Array.from(https.authority.caDer).buffer, 200, {
+      'Content-Type': 'application/x-x509-ca-cert',
+      'Content-Disposition': 'attachment; filename="binder-ca.crt"',
+      'Cache-Control': 'no-store',
+    })
+  }
+  if (https.port === null || isHttps(c)) return null
+  const secure = `https://${hostname}:${https.port}`
+  if (!read || c.req.path === '/api' || c.req.path.startsWith('/api/')) {
+    throw new ApiError(403, 'use_https', `Open Binder at ${secure}`)
+  }
+  const url = new URL(c.req.url)
+  return c.redirect(`${secure}${url.pathname}${url.search}`, 302)
 }
 
 /** A device's cookie is sent again, with a new 400 days, once a day while it's used, so a phone in use stays paired. */
@@ -215,9 +250,10 @@ const COOKIE_RESEND_MS = 24 * 60 * 60_000
  * - From this computer (its listener, its own address): this computer's rules, as before phones. The web app's files
  *   are anyone's on it.
  * - Anything else (the phones' listener, or a proxy for a phone): the Host must be an address or this computer's name
- *   (defeats DNS rebinding), else 403 `wrong_host`; the web app's files are then anyone's, as they're code, not the
- *   library. An API request that changes something must name Binder's own page as its Origin, and a phone's browser
- *   sends no other sign over HTTP, so the Origin is required; a cross-site read is refused too (403 `cross_site`).
+ *   (defeats DNS rebinding), else 403 `wrong_host`. The phones' listener answers its own pages (phonesOwn), and sends
+ *   phones on to HTTPS while that's on. The web app's files are then anyone's, as they're code, not the library. An
+ *   API request that changes something must name Binder's own page as its Origin, and a phone's browser sends no
+ *   other sign over HTTP, so the Origin is required; a cross-site read is refused too (403 `cross_site`).
  *   Then the route's policy: `public` routes are rate-limited by address; any other needs a paired phone's cookie
  *   (401 `unpaired`, and 429 after too many from one address; through a proxy, only while Binder listens for
  *   phones), and `pc` routes refuse a phone (403 `pc_only`).
@@ -249,6 +285,8 @@ export function guard(lan: LanGuard | undefined): MiddlewareHandler<AppEnv> {
       throw new ApiError(403, 'wrong_host', url ? `Open Binder at ${url}` : "Open Binder at this PC's address")
     }
     lan?.addresses.noticeHost(hostname)
+    const own = lan && c.env?.listener === 'lan' ? phonesOwn(c, hostname, lan.httpsSetup()) : null
+    if (own) return own
     if (!api) return next()
 
     const method = c.req.method

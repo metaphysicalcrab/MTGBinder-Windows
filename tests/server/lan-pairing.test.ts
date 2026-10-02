@@ -50,7 +50,14 @@ describe('pairing a phone (spec §5.10)', () => {
     expect(status.pairing).toBeNull()
     expect(status.pairingEnded).toEqual({ reason: 'paired', name: 'Pixel 8' })
     expect(status.devices).toEqual([
-      { id: 1, name: 'Pixel 8', createdAt: expect.any(String), lastSeenAt: expect.any(String), lastIp: '192.168.1.40' },
+      {
+        id: 1,
+        name: 'Pixel 8',
+        createdAt: expect.any(String),
+        lastSeenAt: expect.any(String),
+        lastIp: '192.168.1.40',
+        https: false,
+      },
     ] satisfies LanDevice[])
     // One phone per window: the code doesn't pair another.
     expect(await error(await pair(app, { code: window.code }, '192.168.1.41'))).toEqual([409, 'not_pairing'])
@@ -292,7 +299,6 @@ describe('paired phones (spec §5.10)', () => {
     const moved = await body<LanStatus>(await app.local('/api/lan', json({ address: '172.20.0.1' }, 'PUT')))
     expect([moved.address, moved.url]).toEqual(['172.20.0.1', `http://172.20.0.1:${on.port}`])
     expect(await error(await app.local('/api/lan', json({ address: '10.9.9.9' }, 'PUT')))).toEqual([400, 'bad_address'])
-    expect(await error(await app.local('/api/lan', json({ https: true }, 'PUT')))).toEqual([400, 'https_unavailable'])
     expect(await error(await app.local('/api/lan', json({ enabled: 'yes' }, 'PUT')))).toEqual([400, 'bad_request'])
     const back = await body<LanStatus>(await app.local('/api/lan', json({ enabled: false, address: null }, 'PUT')))
     expect(back).toMatchObject({ enabled: false, listening: false, url: null, address: null })

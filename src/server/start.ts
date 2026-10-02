@@ -3,6 +3,7 @@ import type { Server } from 'node:http'
 import path from 'node:path'
 import { serve } from '@hono/node-server'
 import type { Hono } from 'hono'
+import type { LanSummary } from '../shared/types.ts'
 import { createAiClient } from './ai/client.ts'
 import { createKeyStore } from './ai/key-store.ts'
 import { createApp } from './app.ts'
@@ -12,7 +13,7 @@ import { ensureCardNamesCurrent } from './cards/repo.ts'
 import { LAN_PORT, libraryPaths } from './config.ts'
 import { type DB, openDb, openFailureLine } from './db/index.ts'
 import type { AppEnv } from './http.ts'
-import { createLanController, type LanSummary } from './lan/controller.ts'
+import { createLanController } from './lan/controller.ts'
 import { createCardLookups } from './scanner/lookups.ts'
 import { createOcrClient } from './scanner/ocr-client.ts'
 import type { OcrHelper } from './scanner/ocr-helper.ts'
@@ -37,7 +38,7 @@ export interface BinderOptions {
   host?: string
   /**
    * The phones' port while phone access is on (spec §5.10): by default BINDER_LAN_PORT, else 4322; null (BINDER_LAN=0)
-   * keeps phone access off. 0 picks a free port.
+   * keeps phone access off. HTTPS, when it's on, takes the next one up. 0 picks a free port (for each).
    */
   lanPort?: number | null
   /** Where phones' requests are listened for: default 0.0.0.0, every IPv4 network; tests pass 127.0.0.1. */
@@ -58,6 +59,11 @@ export interface RunningBinder {
   port: number
   /** Phone access: the addresses phones open while Binder listens for them, or why it can't. */
   readonly lan: LanSummary
+  /**
+   * Turns phone access on or off, as Settings → Phone access does (the desktop app's tray). Resolves once it listens or
+   * has stopped; rejects (ApiError `lan_off`) turning it on when BINDER_LAN=0 keeps it off.
+   */
+  setLan(enabled: boolean): Promise<LanSummary>
   /**
    * Stops listening (for this computer and for phones), then closes the OCR helper and the library. It doesn't wait
    * for a card-data refresh or a scan in progress: it's meant to be followed by the process exiting, as the desktop
@@ -168,6 +174,10 @@ export async function startBinder(options: BinderOptions): Promise<RunningBinder
     url,
     port,
     get lan() {
+      return lan.summary()
+    },
+    async setLan(enabled) {
+      await lan.update({ enabled })
       return lan.summary()
     },
     stop() {

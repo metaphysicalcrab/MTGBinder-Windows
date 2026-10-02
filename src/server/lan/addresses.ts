@@ -118,13 +118,13 @@ export interface AddressBook {
   allows(remote: string | undefined): boolean
   /** A request named this address as its Host: when it isn't one Binder knows, the addresses are read again. */
   noticeHost(hostname: string): void
-  /** Reads the addresses every 30 s, telling onChange when they change, until stopped. */
+  /** Reads the addresses every 30 s, telling onChange when they change (and onPoll each time), until stopped. */
   watch(): void
   stop(): void
 }
 
 export function createAddressBook(
-  options: { interfaces?: Interfaces; onChange?: () => void; now?: () => number } = {},
+  options: { interfaces?: Interfaces; onChange?: () => void; onPoll?: () => void; now?: () => number } = {},
 ): AddressBook {
   const read = () => {
     try {
@@ -170,7 +170,10 @@ export function createAddressBook(
       if (now() - readAt >= MISS_READ_MS) refresh()
     },
     watch() {
-      timer ??= setInterval(refresh, ADDRESS_POLL_MS).unref()
+      timer ??= setInterval(() => {
+        refresh()
+        options.onPoll?.()
+      }, ADDRESS_POLL_MS).unref()
     },
     stop() {
       clearInterval(timer)

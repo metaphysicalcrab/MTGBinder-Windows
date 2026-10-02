@@ -1,13 +1,11 @@
 import 'reflect-metadata' // @peculiar/x509 needs the polyfill, loaded before it
 import * as x509 from '@peculiar/x509'
-import { execFile } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
-import { promisify } from 'node:util'
-import { removeWithRetry, renameWithRetryAsync } from '../fs-retry.ts'
+import { ownerOnlyOnWindows, runTool, writeOwnerOnly, type RunTool } from '../owner-only.ts'
 
 /**
  * Phone access over HTTPS: Binder's own certificate authority, which the owner installs on the phone once, and the
@@ -63,8 +61,8 @@ export interface CertificateOptions {
   computerName?: string
   /** Whose rules make the files private: Windows' access lists, or mode 600 everywhere else. Default: this platform. */
   platform?: NodeJS.Platform
-  /** Makes a file private to the current user on Windows (default: icacls). Tests pass a stand-in. */
-  ownerOnly?: (file: string) => void | Promise<void>
+  /** Runs Windows' tools (whoami, icacls) that make a file private there. Tests pass a stand-in. */
+  run?: RunTool
 }
 
 /** The certificate authority, as the phone installs it and the setup page shows it. */
@@ -150,16 +148,17 @@ async function certificates(options: CertificateOptions, rotate: boolean): Promi
   const { dir, now = new Date() } = options
   await fs.promises.mkdir(dir, { recursive: true, mode: 0o700 })
   removeLeftovers(dir)
+  const write = privateWriter(options)
   let ca = rotate ? null : loadAuthority(dir, now)
   let authority: LanCertificates['authority'] = 'kept'
   if (!ca) {
     authority = [CA_CERT, CA_KEY].some((file) => fs.existsSync(path.join(dir, file))) ? 'replaced' : 'created'
-    ca = await createAuthority(options, now)
+    ca = await createAuthority(options, now, write)
   }
   const names = coveredNames(ca.constraints, options.addresses, options.hostnames)
   let leaf = authority === 'kept' ? loadLeaf(dir, ca, names, now) : null
   const reissued = !leaf
-  leaf ??= await issueLeaf(options, ca, names, now)
+  leaf ??= await issueLeaf(options, ca, names, now, write)
   return {
     ...authorityInfo(ca),
     key: leaf.keyPem,
@@ -242,7 +241,7 @@ function loadLeaf(dir: string, ca: Authority, names: Names, now: Date): Leaf | n
   }
 }
 
-async function createAuthority(options: CertificateOptions, now: Date): Promise<Authority> {
+async function createAuthority(options: CertificateOptions, now: Date, write: WritePrivate): Promise<Authority> {
   const keys = await crypto.webcrypto.subtle.generateKey(ALGORITHM, true, ['sign', 'verify'])
   const constraints: Constraints = {
     ranges: PRIVATE_RANGES.map(([address, bits]) => range(address, bits)),
@@ -271,12 +270,18 @@ async function createAuthority(options: CertificateOptions, now: Date): Promise<
   })
   const cert = new crypto.X509Certificate(Buffer.from(parsed.rawData))
   const keyPem = privateKeyPem(keys.privateKey)
-  await writePrivate(path.join(options.dir, CA_KEY), keyPem, options)
-  await writePrivate(path.join(options.dir, CA_CERT), cert.toString(), options)
+  write(path.join(options.dir, CA_KEY), keyPem)
+  write(path.join(options.dir, CA_CERT), cert.toString())
   return { cert, parsed, keyPem, constraints }
 }
 
-async function issueLeaf(options: CertificateOptions, ca: Authority, names: Names, now: Date): Promise<Leaf> {
+async function issueLeaf(
+  options: CertificateOptions,
+  ca: Authority,
+  names: Names,
+  now: Date,
+  write: WritePrivate,
+): Promise<Leaf> {
   const keys = await crypto.webcrypto.subtle.generateKey(ALGORITHM, true, ['sign', 'verify'])
   const caKey = crypto.createPrivateKey(ca.keyPem).export({ type: 'pkcs8', format: 'der' })
   const signingKey = await crypto.webcrypto.subtle.importKey('pkcs8', caKey, ALGORITHM, false, ['sign'])
@@ -306,9 +311,9 @@ async function issueLeaf(options: CertificateOptions, ca: Authority, names: Name
   })
   const cert = new crypto.X509Certificate(Buffer.from(parsed.rawData))
   const keyPem = privateKeyPem(keys.privateKey)
-  await writePrivate(path.join(options.dir, LEAF_KEY), keyPem, options)
+  write(path.join(options.dir, LEAF_KEY), keyPem)
   // Written as served: ending in a newline, so the files joined (`leaf.pem` then `ca.pem`) are the chain.
-  await writePrivate(path.join(options.dir, LEAF_CERT), cert.toString(), options)
+  write(path.join(options.dir, LEAF_CERT), cert.toString())
   return { cert, parsed, keyPem }
 }
 
@@ -478,61 +483,16 @@ function oneAtATime<T>(dir: string, task: () => Promise<T>): Promise<T> {
   return result
 }
 
-const execFileAsync = promisify(execFile)
-
-/** Windows' own tools, by full path, so a program of the same name elsewhere on the PATH is never run instead. */
-const windowsTool = (name: string) =>
-  path.win32.join(process.env.SystemRoot ?? process.env.windir ?? 'C:\\Windows', 'System32', name)
-
-let userSid: string | undefined
+type WritePrivate = (file: string, contents: string) => void
 
 /**
- * On Windows, makes `file` readable and writable by the current user alone, as the API key's file is
- * (ai/key-store.ts): its inherited entries are removed, and the user, by their security identifier, given full control.
+ * Writes a file only its owner can read (owner-only.ts): through a temporary copy renamed over it, so a crash never
+ * leaves half a key or certificate; mode 600, and on Windows an access list with the current user alone, set while the
+ * copy is still empty (best effort: when it can't be, the reason is logged).
  */
-async function ownerOnlyOnWindows(file: string): Promise<void> {
-  if (!userSid) {
-    // `whoami /user /fo csv /nh` prints `"pc\name","S-1-5-21-…"`.
-    const { stdout } = await execFileAsync(windowsTool('whoami.exe'), ['/user', '/fo', 'csv', '/nh'], { windowsHide: true })
-    userSid = /"(S-1-[\d-]+)"\s*$/.exec(stdout.trim())?.[1]
-    if (!userSid) throw new Error("whoami didn't say who the current user is")
-  }
-  await execFileAsync(windowsTool('icacls.exe'), [file, '/inheritance:r', '/grant:r', `*${userSid}:F`], {
-    windowsHide: true,
-  })
-}
-
-/**
- * Writes a file only its owner can read, through a temporary copy renamed over it, so a crash never leaves half a
- * key or certificate: mode 600, and on Windows, where mode bits don't exist, an access list with the current user
- * alone, set while the copy is still empty (best effort: when it can't be, the reason is logged).
- */
-async function writePrivate(file: string, contents: string, options: CertificateOptions): Promise<void> {
-  const { platform = process.platform, ownerOnly = ownerOnlyOnWindows } = options
-  const temp = `${file}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`
-  try {
-    if (platform === 'win32') {
-      await fs.promises.writeFile(temp, '', { flag: 'wx' })
-      try {
-        await ownerOnly(temp)
-      } catch (err) {
-        console.error(`[phone] Couldn't make ${temp} private to this user: ${err instanceof Error ? err.message : String(err)}`)
-      }
-      await fs.promises.writeFile(temp, contents)
-      if (fs.existsSync(file)) await fs.promises.chmod(file, 0o666) // Windows won't rename over a read-only file
-    } else {
-      await fs.promises.writeFile(temp, contents, { flag: 'wx', mode: 0o600 })
-      await fs.promises.chmod(temp, 0o600) // exactly 600, whatever the umask took away
-    }
-    await renameWithRetryAsync(temp, file, { platform })
-  } catch (err) {
-    try {
-      removeWithRetry(temp, { platform }) // it may hold a key
-    } catch {
-      // The next call removes it (removeLeftovers); the write's own failure is the one to report.
-    }
-    throw err
-  }
+function privateWriter(options: CertificateOptions): WritePrivate {
+  const ownerOnly = ownerOnlyOnWindows(options.run ?? runTool, '[phone]')
+  return (file, contents) => writeOwnerOnly(file, contents, { platform: options.platform, ownerOnly })
 }
 
 /** Whether `pid` is another process that is still running: a signal 0 reaches it, or it exists but isn't ours. */
@@ -547,14 +507,14 @@ function otherProcessRunning(pid: number): boolean {
 }
 
 /**
- * Removes the temporary copies writes leave when a crash stops them between writing and renaming
- * (`<file>.<pid>.<random>.tmp`), which can hold a key; one another running Binder is still writing is left to it.
- * Calls in this process don't overlap, so none of its own is in progress. Best effort.
+ * Removes the temporary copies writes leave when a crash stops them between writing and renaming (`<file>.<pid>.tmp`),
+ * which can hold a key; one another running Binder is still writing is left to it. Calls in this process don't
+ * overlap, so none of its own is in progress. Best effort.
  */
 function removeLeftovers(dir: string): void {
   try {
     for (const entry of fs.readdirSync(dir)) {
-      const pid = /^(?:ca|ca-key|leaf|leaf-key)\.pem\.(\d+)\.[0-9a-f]+\.tmp$/.exec(entry)?.[1]
+      const pid = /^(?:ca|ca-key|leaf|leaf-key)\.pem\.(\d+)\.tmp$/.exec(entry)?.[1]
       if (pid !== undefined && !otherProcessRunning(Number(pid))) fs.rmSync(path.join(dir, entry), { force: true })
     }
   } catch {
