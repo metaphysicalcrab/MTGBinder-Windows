@@ -60,6 +60,7 @@ try {
 fs.mkdirSync(paths.electronDir, { recursive: true })
 app.setPath('userData', paths.electronDir)
 
+/** The server's process, until it exits. */
 let server: UtilityProcess | null = null
 /** The web app's address, once the server listens. */
 let appUrl: string | null = null
@@ -69,9 +70,11 @@ let tray: Tray | null = null
 /** Windows: the hidden window that hears the session end (stopWithWindows). */
 let sessionListener: BaseWindow | null = null
 let quitting = false
+/** Whether the server has been told to stop (by Quit, or Windows ending the session). */
+let stopping = false
 /**
- * The server's log for this run. It's never ended: the server's output can still arrive after its process exits, and
- * Binder's own exit closes the file.
+ * This run's log, opened first thing once Electron is ready. It's never ended: the server's output can still arrive
+ * after its process exits, and Binder's own exit closes the file.
  */
 let log: fs.WriteStream | null = null
 
@@ -195,7 +198,6 @@ function fail(message: string): void {
 }
 
 function startServer(): void {
-  log = openLog()
   const child = utilityProcess.fork(path.join(import.meta.dirname, 'server.ts'), [], {
     serviceName: 'Binder server',
     stdio: 'pipe',
@@ -214,6 +216,8 @@ function startServer(): void {
     }
   })
   child.on('exit', (code) => {
+    // Gone: a quit now goes ahead.
+    if (server === child) server = null
     if (!quitting) {
       quitting = true
       const message = `Binder's server stopped unexpectedly (exit ${code}). Open Binder again to restart it.`
@@ -292,14 +296,31 @@ function stopWithWindows(): void {
     return
   }
   sessionListener.on('session-end', () => {
-    if (quitting || !server) return
-    quitting = true
-    appLog('Windows is ending the session: stopping the server')
+    if (!server) return
     const { pid } = server
-    server.postMessage({ type: 'stop' })
+    // A quit may have asked it to stop already: then it's only waited for.
+    if (!stopping) appLog('Windows is ending the session: stopping the server')
+    stopServer()
     const until = Date.now() + 3_000
     while (pid !== undefined && running(pid) && Date.now() < until) blockFor(50)
   })
+}
+
+/**
+ * Asks the server to stop (it closes the library), kills it if it hasn't after 5 seconds, and quits Binder once it has
+ * exited. Once: asked again while it stops, it's left to finish.
+ */
+function stopServer(): void {
+  if (!server || stopping) return
+  stopping = true
+  quitting = true
+  const child = server
+  const force = setTimeout(() => child.kill(), 5000)
+  child.once('exit', () => {
+    clearTimeout(force)
+    app.quit()
+  })
+  child.postMessage({ type: 'stop' })
 }
 
 /** Whether the process is still running. */
@@ -332,23 +353,20 @@ if (!app.requestSingleInstanceLock({ quit: quitAsked })) {
   app.on('activate', showWindow)
   // Closing the window keeps Binder running (in the menu bar, or the notification area).
   app.on('window-all-closed', () => {})
-  // Quitting stops the server first (it closes the library), for up to 5 seconds.
+  // Quitting stops the server first (stopServer). Every quit waits until it has exited: one let through while it stops
+  // (Ctrl+Q again, the tray's Quit Binder, `Binder.exe --quit`) would end it mid-stop.
   app.on('before-quit', (event) => {
-    if (quitting || !server) return
+    if (!server) return
     event.preventDefault()
-    quitting = true
-    const child = server
-    const force = setTimeout(() => child.kill(), 5000)
-    child.once('exit', () => {
-      clearTimeout(force)
-      app.quit()
-    })
-    child.postMessage({ type: 'stop' })
+    stopServer()
   })
   // No top-level await on whenReady: an ES module entry that awaits it never gets there.
   void app.whenReady().then(() => {
     // Anything that throws here would leave Binder without a window, or on "Starting…" for good: it's said instead.
     try {
+      // First, so what's said before the server starts (a missing tray icon, say) is in this run's log, not rotated out
+      // with the last run's.
+      log = openLog()
       // Windows draws the title bar dark, over the dark page, whatever its own light or dark setting.
       if (process.platform !== 'darwin') nativeTheme.themeSource = 'dark'
       allowPermissions()

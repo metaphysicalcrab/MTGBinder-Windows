@@ -10,8 +10,9 @@ export interface DesktopApp {
   /** Why it can't be installed now, or null; asked before anything is built. */
   blocked(): string | null
   /**
-   * Builds what's packaged besides the web app (the Mac's OCR helper), and packages Binder with electron-builder: to
-   * install, or (install false) to run from release/. Returns what it made.
+   * Builds what's packaged besides the web app (the Mac's OCR helper), and packages Binder with electron-builder (on
+   * Windows, once a running Binder has quit): to install, or (install false) to run from release/. Returns what it
+   * made.
    */
   package(install: boolean): Promise<string>
   /** Installs what package() made, replacing the installed Binder; returns the line saying where it is now. */

@@ -2,6 +2,7 @@
   "name": "binder",
   "version": "0.1.0",
   "description": "Personal MTG collection manager: collection, decks, scanning, and a deckbuilding chat.",
+  "author": "Binder",
   "private": true,
   "type": "module",
   "main": "electron/main.ts",

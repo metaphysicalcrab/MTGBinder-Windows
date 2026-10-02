@@ -1,13 +1,15 @@
 // Binder on Windows: electron-builder's per-user installer (package.json's nsis), run silently. It installs Binder in
 // %LOCALAPPDATA%\Programs\binder with no administrator prompt, a Start menu shortcut (and one on the desktop), and an
 // entry in Settings → Apps to uninstall it, which leaves the library alone: it's the owner's data, in
-// %LOCALAPPDATA%\Binder (nsis.deleteAppDataOnUninstall stays false). A running Binder is asked to quit first
-// (`Binder.exe --quit`), so it closes the library itself: the installer would otherwise end it mid-write.
+// %LOCALAPPDATA%\Binder (nsis.deleteAppDataOnUninstall stays false). A running Binder is asked to quit before
+// packaging (`Binder.exe --quit`), so it closes the library itself: electron-builder starts by deleting
+// release\win-unpacked, which Windows refuses while a Binder runs from it, and the installer would end one mid-write.
 // `pnpm app --no-install` makes the folder instead (`dir`): release\win-unpacked\Binder.exe.
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import type { CliOptions } from 'electron-builder'
 import { QUIT_SWITCH } from '../../electron/platform.ts'
 import { ROOT_DIR } from '../../src/server/config.ts'
 import { electronBuilder, firstLine, InstallError, step } from './build.ts'
@@ -76,7 +78,7 @@ export function builtExe(releaseDir: string): string {
   return found
 }
 
-/** What installing on Windows needs of the computer: tests pass their own. */
+/** What packaging and installing on Windows need of the computer: tests pass their own. */
 export interface WindowsDeps {
   env: NodeJS.ProcessEnv
   home: string
@@ -84,10 +86,14 @@ export interface WindowsDeps {
   run(file: string, args: string[]): void
   running(): boolean
   exists(file: string): boolean
-  /** The Binder.exe just built, when there's one (it can ask a Binder that isn't the installed one to quit). */
+  /** When the file last changed (ms since 1970), or null when there's none. */
+  modified(file: string): number | null
+  /** The Binder.exe in release\ (the last build's), when there's one: it asks Binder to quit when none is installed. */
   builtExe(): string | null
   sleep(ms: number): Promise<void>
   now(): number
+  /** Packages Binder (electronBuilder). */
+  electronBuilder(options: CliOptions): Promise<string[]>
 }
 
 function windowsDeps(): WindowsDeps {
@@ -98,6 +104,7 @@ function windowsDeps(): WindowsDeps {
     run: (file, args) => void execFileSync(file, args, { stdio: 'ignore', windowsHide: true, timeout: 5 * 60_000 }),
     running: () => binderRunning(),
     exists: (file) => fs.existsSync(file),
+    modified: (file) => fs.statSync(file, { throwIfNoEntry: false })?.mtimeMs ?? null,
     builtExe: () => {
       try {
         return builtExe(path.join(ROOT_DIR, 'release'))
@@ -107,6 +114,7 @@ function windowsDeps(): WindowsDeps {
     },
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     now: () => Date.now(),
+    electronBuilder,
   }
 }
 
@@ -128,18 +136,27 @@ export async function quitBinder(exe: string, deps: WindowsDeps, waitMs = QUIT_W
   return true
 }
 
+/** Asks a running Binder, if there's one, to quit; throws the line saying to quit it when it doesn't. */
+export async function quitRunningBinder(deps: WindowsDeps): Promise<void> {
+  if (!deps.running()) return
+  console.log('Binder is running: asking it to quit…')
+  // The installed one can ask any Binder (they share the library, and its lock); without one, the one in release\.
+  const target = installTarget(deps.env, deps.home)
+  const asker = deps.exists(target) ? target : deps.builtExe()
+  if (!asker || !(await quitBinder(asker, deps))) throw new InstallError(QUIT_FIRST)
+}
+
 /**
  * Installs Binder with its installer, silently (/S: no window, no questions, and it doesn't open Binder after), once
- * any running Binder has quit. Returns the line saying where it is.
+ * any running Binder has quit, and checks it did: the Binder.exe it leaves is new. Returns the line saying where it is.
  */
 export async function installOnWindows(installer: string, deps: WindowsDeps): Promise<string> {
   const target = installTarget(deps.env, deps.home)
-  if (deps.running()) {
-    console.log('Binder is running: asking it to quit…')
-    // The installed one can ask any Binder (they share the library, and its lock); without one, the one just built.
-    const asker = deps.exists(target) ? target : deps.builtExe()
-    if (!asker || !(await quitBinder(asker, deps))) throw new InstallError(QUIT_FIRST)
-  }
+  // Asked again: one may have been opened while Binder was packaged.
+  await quitRunningBinder(deps)
+  // The installed one's time, if there's one: an installer that gives up without a word (one that finds Binder running
+  // and can't end it, say) exits as if it had installed, and leaves it as it was.
+  const before = deps.modified(target)
   console.log('Installing Binder…')
   try {
     deps.run(installer, ['/S'])
@@ -150,7 +167,14 @@ export async function installOnWindows(installer: string, deps: WindowsDeps): Pr
         `again; if it fails again, open ${installer} to see why.`,
     )
   }
-  if (!deps.exists(target)) throw new InstallError(`Binder's installer finished, but there's no ${EXE} at ${target}.`)
+  const after = deps.modified(target)
+  if (after === null) throw new InstallError(`Binder's installer finished, but there's no ${EXE} at ${target}.`)
+  if (before !== null && after <= before) {
+    throw new InstallError(
+      `Binder's installer finished without replacing ${target}. Run pnpm app again; if it fails again, open ` +
+        `${installer} to see why.`,
+    )
+  }
   return `Installed Binder in ${path.win32.dirname(target)}. Open Binder from the Start menu.`
 }
 
@@ -158,11 +182,14 @@ export async function installOnWindows(installer: string, deps: WindowsDeps): Pr
 export function windowsApp(deps: WindowsDeps = windowsDeps()): DesktopApp {
   return {
     name: 'Binder',
-    // A running Binder is asked to quit just before installing, rather than refused.
+    // A running Binder is asked to quit just before packaging, rather than refused.
     blocked: () => null,
     async package(install) {
+      // Both builds start by deleting release\win-unpacked, where `pnpm app --no-install`'s Binder may still run.
+      await quitRunningBinder(deps)
       console.log(install ? 'Packaging Binder and its installer…' : 'Packaging Binder…')
-      const artifacts = await step("Couldn't package Binder", () => electronBuilder({ win: [install ? 'nsis' : 'dir'] }))
+      const win = [install ? 'nsis' : 'dir']
+      const artifacts = await step("Couldn't package Binder", () => deps.electronBuilder({ win }))
       return install ? installerIn(artifacts) : builtExe(path.join(ROOT_DIR, 'release'))
     },
     install: (installer) => installOnWindows(installer, deps),

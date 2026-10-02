@@ -13,6 +13,7 @@ import {
   installTarget,
   listsImage,
   quitBinder,
+  windowsApp,
   type WindowsDeps,
 } from '../../scripts/lib/install-win32.ts'
 import { tempDir } from '../helpers/tmp.ts'
@@ -145,11 +146,14 @@ describe('Binder on Windows (install-win32)', () => {
     expect(builtExe(dir)).toBe(path.join(dir, 'win-arm64-unpacked', 'Binder.exe'))
   })
 
-  /** A Windows PC to install on: what's running, what's on disk, and what was run, with its own clock. */
+  /**
+   * A Windows PC to package and install on: what's running, what's on disk (and when it last changed), and what was
+   * run, with its own clock.
+   */
   function pc(options: { runningFor?: number; installed?: boolean; built?: string | null; installer?: (args: string[]) => void } = {}) {
     let clock = 0
     const target = String.raw`C:\Users\me\AppData\Local\Programs\binder\Binder.exe`
-    const files = new Set(options.installed ? [target] : [])
+    const files = new Map(options.installed ? [[target, -1]] : [])
     const ran: string[] = []
     const deps: WindowsDeps = {
       env: { LOCALAPPDATA: String.raw`C:\Users\me\AppData\Local` },
@@ -158,7 +162,7 @@ describe('Binder on Windows (install-win32)', () => {
         ran.push([file, ...args].join(' '))
         if (args[0] === '/S') {
           options.installer?.(args)
-          files.add(target)
+          files.set(target, clock)
         }
       },
       // Binder quits `runningFor` ms after it's asked; running for good without being asked.
@@ -167,11 +171,16 @@ describe('Binder on Windows (install-win32)', () => {
         return options.runningFor !== undefined && (!asked || clock < options.runningFor)
       },
       exists: (file) => files.has(file),
+      modified: (file) => files.get(file) ?? null,
       builtExe: () => options.built ?? null,
       sleep: async (ms) => {
         clock += ms
       },
       now: () => clock,
+      electronBuilder: async (builder) => {
+        ran.push(`electron-builder --win ${builder.win?.join(' ')}`)
+        return [String.raw`C:\dev\binder\release\Binder-Setup-0.1.0.exe`]
+      },
     }
     return { deps, ran, target }
   }
@@ -212,6 +221,24 @@ describe('Binder on Windows (install-win32)', () => {
     expect(ran.some((line) => line.endsWith('/S'))).toBe(false)
   })
 
+  it('asks a running Binder to quit before packaging, which replaces release\\win-unpacked, where one may run', async () => {
+    // `pnpm app --no-install`'s Binder, with none installed: it asks itself.
+    const built = String.raw`C:\dev\binder\release\win-unpacked\Binder.exe`
+    const { deps, ran } = pc({ runningFor: 500, built })
+    expect(await windowsApp(deps).package(true)).toBe(String.raw`C:\dev\binder\release\Binder-Setup-0.1.0.exe`)
+    expect(ran).toEqual([`${built} --quit`, 'electron-builder --win nsis'])
+    // One that won't quit: nothing is packaged, for the folder build either.
+    for (const install of [true, false]) {
+      const stuck = pc({ runningFor: 60_000, built })
+      await expect(windowsApp(stuck.deps).package(install)).rejects.toThrow(/^Binder is running and didn't quit when asked/)
+      expect(stuck.ran).toEqual([`${built} --quit`])
+    }
+    // Nothing running: nothing asked.
+    const idle = pc({ built })
+    await windowsApp(idle.deps).package(true)
+    expect(idle.ran).toEqual(['electron-builder --win nsis'])
+  })
+
   it('says in one line when the installer fails, or leaves no Binder.exe', async () => {
     const failing = pc({
       installer: () => {
@@ -229,11 +256,27 @@ describe('Binder on Windows (install-win32)', () => {
       new InstallError(`Binder's installer finished, but there's no Binder.exe at ${empty.target}.`),
     )
   })
+
+  it('says so when the installer exits without replacing the installed Binder', async () => {
+    // As one that finds Binder running and can't end it does, silently.
+    const unchanged = pc({ installed: true })
+    unchanged.deps.run = () => {}
+    await expect(installOnWindows('Binder-Setup-0.1.0.exe', unchanged.deps)).rejects.toThrow(
+      new InstallError(
+        `Binder's installer finished without replacing ${unchanged.target}. Run pnpm app again; if it fails again, open ` +
+          'Binder-Setup-0.1.0.exe to see why.',
+      ),
+    )
+    // A reinstall that does replace it.
+    const reinstall = pc({ installed: true })
+    expect(await installOnWindows('Binder-Setup-0.1.0.exe', reinstall.deps)).toMatch(/^Installed Binder in /)
+  })
 })
 
 describe('packaging (package.json\'s build)', () => {
   const pkg = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
     name: string
+    author?: string
     build: {
       files: string[]
       mac: { files: string[] }
@@ -253,6 +296,8 @@ describe('packaging (package.json\'s build)', () => {
     expect(pkg.name).toBe('binder')
     const installer = String(pkg.build.nsis.artifactName).replace('${version}', '0.1.0').replace('${ext}', 'exe')
     expect(installerIn([installer])).toBe('Binder-Setup-0.1.0.exe')
+    // Binder.exe's company and Settings → Apps' publisher: without an author, Electron's ("GitHub, Inc.") and none.
+    expect(pkg.author).toBe('Binder')
   })
 
   it('ships each platform\'s OCR helper and tray icon, and only its own SQLite build', () => {
