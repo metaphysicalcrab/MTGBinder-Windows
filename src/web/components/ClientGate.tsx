@@ -7,7 +7,9 @@ import {
   ClientContext,
   clientFromAnswer,
   clientOnFailure,
+  goToHttps,
   hasPairingKey,
+  movedToHttps,
   watchApiSignals,
   type ClientView,
 } from '../lib/client.ts'
@@ -24,6 +26,10 @@ async function whoIsThis(onWaiting: () => void, alive: () => boolean): Promise<C
     try {
       return clientFromAnswer(await apiGet<LanClient>('/api/lan/me', AbortSignal.timeout(5000)))
     } catch (err) {
+      if (movedToHttps(err)) {
+        goToHttps()
+        return null
+      }
       const view = clientOnFailure(err, window.location.hostname)
       if (view && !(view.kind === 'pc' && attempt === 1 && !(err instanceof ApiRequestError))) return view
       if (!view) onWaiting()

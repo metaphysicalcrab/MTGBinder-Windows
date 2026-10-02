@@ -546,8 +546,8 @@ function HttpsSettings({ status }: { status: LanStatus }) {
           </span>
         </Switch>
         <p className="text-sm text-stone-400">
-          Binder makes its own certificate, which vouches only for this {COMPUTER}'s addresses on private networks, and each phone installs
-          it once. Without HTTPS everything else works, and Scan takes a photo of each card. Phones paired before it's turned on or off
+          Binder makes its own certificate, which vouches only for private network addresses and .local names, and each phone installs it
+          once. Without HTTPS everything else works, and Scan takes a photo of each card. Phones paired before it's turned on or off
           must pair again.
         </p>
         {update.error && (
@@ -634,9 +634,10 @@ function InstallSteps({ status }: { status: LanStatus }) {
           </li>
         </ol>
         <p className="text-stone-400">
-          Android then shows a “Network may be monitored” notice, as it does for any certificate installed by hand. This one can't be used
-          to read the phone's other traffic: it vouches only for private network addresses (10.x, 172.16–31.x, 192.168.x) and .local names,
-          never for a website.
+          Android then shows a “Network may be monitored” notice, as it does for any certificate installed by hand. This one vouches only for
+          private network addresses (10.x, 172.16–31.x, 192.168.x) and .local names, never for a website on the internet, so it can't be
+          used to read the phone's traffic to other sites. Its key stays on this {COMPUTER}: someone who copied it could pose as another
+          device on this network, so keep the {COMPUTER} as safe as the phone.
         </p>
         <p className="text-stone-400">
           Firefox for Android doesn't use certificates installed this way: use Chrome. After Make a new certificate, remove the old Binder

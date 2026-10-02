@@ -60,9 +60,27 @@ const watchers = new Set<Watcher>()
  * Brainstorm's stream its own.
  */
 export function reportApiError(err: unknown): void {
+  if (movedToHttps(err)) return goToHttps()
   const signal = apiSignal(err)
   if (!signal) return
   for (const watcher of watchers) watcher(signal, (err as Error).message)
+}
+
+/**
+ * Whether the PC turned HTTPS on since this page opened over plain HTTP (403 `use_https`): its API answers there no
+ * longer, while its pages send the phone to the HTTPS address.
+ */
+export function movedToHttps(err: unknown): boolean {
+  return err instanceof ApiRequestError && err.status === 403 && err.code === 'use_https'
+}
+
+let leaving = false
+
+/** Opens this page again, which the phones' HTTP port now sends on to the HTTPS address. Once, however many ask. */
+export function goToHttps(): void {
+  if (leaving || typeof window === 'undefined') return
+  leaving = true
+  window.location.reload()
 }
 
 /** This phone forgot itself (Settings → This phone): the gate shows the pairing page. */

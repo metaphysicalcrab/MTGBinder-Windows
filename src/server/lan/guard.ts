@@ -227,8 +227,10 @@ function phonesOwn(c: Context<AppEnv>, hostname: string, https: HttpsSetup): Res
   }
   if (read && c.req.path === '/binder-ca.crt') {
     if (!https.authority) return c.text('HTTPS for phones is off', 404)
+    // A download, not a certificate type: Chrome on Android hands those to Android's installer, which since Android 11
+    // refuses a certificate authority and keeps no copy, where the steps install it from Downloads.
     return c.body(Uint8Array.from(https.authority.caDer).buffer, 200, {
-      'Content-Type': 'application/x-x509-ca-cert',
+      'Content-Type': 'application/octet-stream',
       'Content-Disposition': 'attachment; filename="binder-ca.crt"',
       'Cache-Control': 'no-store',
     })

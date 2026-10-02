@@ -5,6 +5,7 @@ import {
   askAgainIn,
   clientFromAnswer,
   clientOnFailure,
+  movedToHttps,
   pairingKeyIn,
   reportApiError,
   reportForgotten,
@@ -60,6 +61,15 @@ describe('the gate (spec §5.10)', () => {
     const noAnswer = new TypeError('Failed to fetch')
     expect([1, 2, 3, 4, 5, 9].map((attempt) => askAgainIn(noAnswer, attempt))).toEqual([1000, 2000, 4000, 8000, 10_000, 10_000])
     expect(askAgainIn(new ApiRequestError(500, 'internal', 'Something went wrong'), 2)).toBe(2000)
+  })
+})
+
+describe('movedToHttps', () => {
+  it('knows a page left on plain HTTP after the PC turned HTTPS on, and nothing else', () => {
+    expect(movedToHttps(new ApiRequestError(403, 'use_https', 'Open Binder at https://192.168.1.5:4323'))).toBe(true)
+    expect(movedToHttps(new ApiRequestError(403, 'pc_only', 'Change this on the PC running Binder'))).toBe(false)
+    expect(movedToHttps(new ApiRequestError(401, 'unpaired', 'Pair this phone'))).toBe(false)
+    expect(movedToHttps(new Error('use_https'))).toBe(false)
   })
 })
 

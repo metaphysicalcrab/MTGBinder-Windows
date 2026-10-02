@@ -92,8 +92,9 @@ function body({ hostname, on, port, authority }: PhoneSetup): string {
 </ol>
 <h3>About this certificate</h3>
 <p>It can vouch only for addresses on home and office networks (10.x, 172.16–31.x and 192.168.x) and for .local
-  names, so it can't be used to read this phone's traffic to any other site. While it's installed, Android says the
-  network may be monitored: that's this certificate.</p>
+  names, never for a website on the internet: it can't be used to read this phone's traffic to other sites. Its key
+  stays on the PC, so keep the PC as safe as the phone: someone who copied that key could pose as another device on
+  this network. While it's installed, Android says the network may be monitored: that's this certificate.</p>
 <p>When the PC makes a new certificate (in Settings → Phone access), remove this one (Trusted credentials → User →
   it → Remove), then install the new one from this page.</p>
 <p class="muted">Firefox ignores certificates installed this way: use Chrome.</p>`

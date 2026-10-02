@@ -164,7 +164,7 @@ describe('phone access over HTTPS (spec §5.10)', () => {
 
     const ca = await app.request('/binder-ca.crt', {}, { host: 'binder-pc:4322' })
     expect(ca.status).toBe(200)
-    expect(ca.headers.get('content-type')).toBe('application/x-x509-ca-cert')
+    expect(ca.headers.get('content-type')).toBe('application/octet-stream')
     expect(ca.headers.get('content-disposition')).toBe('attachment; filename="binder-ca.crt"')
     const der = new crypto.X509Certificate(Buffer.from(await ca.arrayBuffer()))
     expect(der.fingerprint256).toBe(status.caFingerprint)
