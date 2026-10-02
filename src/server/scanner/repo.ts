@@ -15,6 +15,7 @@ import { parsePrices } from '../cards/repo.ts'
 import { adjustCopies } from '../collection/repo.ts'
 import type { DB } from '../db/index.ts'
 import { addToDeck } from '../decks/repo.ts'
+import { removeWithRetry } from '../fs-retry.ts'
 
 export interface ScanRow {
   id: number
@@ -300,14 +301,52 @@ export function updateScan(db: DB, id: number, patch: ScanPatch, now = new Date(
   })()
 }
 
-/** Deletes a scan's image. Failing to (a folder that became read-only, say) is logged: the scan is done with anyway. */
+/**
+ * How long deleting a scan's image waits on Windows for a program that still has it open (antivirus, the OCR helper):
+ * briefly, as the request adding the scan waits too. One left behind is deleted at the next start.
+ */
+const IMAGE_RETRY_MS = 2_000
+
+/**
+ * Deletes a scan's image. Failing to (a folder that became read-only, or on Windows a file another program holds) is
+ * logged: the scan is done with anyway, and removeFinishedImages deletes the image at the next start.
+ */
 function deleteImage(scansDir: string, row: ScanRow) {
   const file = scanImageFile(scansDir, row)
   try {
-    if (file) fs.rmSync(file, { force: true })
+    if (file) removeWithRetry(file, { budgetMs: IMAGE_RETRY_MS })
   } catch (err) {
     console.error(`[scan] couldn't delete ${file}`, err)
   }
+}
+
+/**
+ * Deletes the images that adding or discarding their scans couldn't (see deleteImage). Only the image of a finished
+ * scan (added, or discarded) goes: an image whose scan is still in the queue, or that no scan names, is left alone.
+ * Best effort; returns how many it deleted.
+ */
+export function removeFinishedImages(db: DB, scansDir: string): number {
+  let names: string[]
+  try {
+    names = fs.readdirSync(scansDir)
+  } catch {
+    return 0 // no scans yet
+  }
+  const finished = db.prepare(
+    "SELECT 1 FROM scan_items WHERE id = ? AND image_path = ? AND status IN ('committed', 'discarded')",
+  )
+  let removed = 0
+  for (const name of names) {
+    const id = /^([1-9]\d*)\.jpg$/.exec(name)?.[1]
+    if (id === undefined || finished.get(Number(id), name) === undefined) continue
+    try {
+      fs.rmSync(path.join(scansDir, name), { force: true })
+      removed++
+    } catch (err) {
+      console.error(`[scan] couldn't delete ${path.join(scansDir, name)}`, err)
+    }
+  }
+  return removed
 }
 
 /** Discards a scan and deletes its image. Returns false if it isn't in the queue. */

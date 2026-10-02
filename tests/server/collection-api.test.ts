@@ -124,6 +124,19 @@ describe('GET /api/collection/export.csv', () => {
     expect(await res.text()).toBe('Count,Name,Edition,Collector Number,Foil\r\n1,"Atraxa, Praetors\' Voice",2xm,190,foil\r\n2,Lightning Bolt,m10,146,\r\n')
   })
 
+  it('starts the file with a byte order mark for Excel, asked with ?excel=1, and only then', async () => {
+    own(db, 'Lightning Bolt', 'm10', 2)
+    const bytes = async (url: string) => Buffer.from(await (await app.request(url)).arrayBuffer())
+    const plain = await bytes('/api/collection/export.csv')
+    const excel = await bytes('/api/collection/export.csv?excel=1')
+    expect([...excel.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf])
+    expect(excel.subarray(3)).toEqual(plain)
+    expect(plain.subarray(0, 5).toString()).toBe('Count')
+    // Binder's own import reads it back.
+    const preview = await body<ImportPreview>(await post('/api/collection/import/preview', { csv: excel.toString('utf8') }))
+    expect(preview.counts).toEqual({ resolved: 1, ambiguous: 0, unresolved: 0 })
+  })
+
   it('round-trips: importing an export resolves every row to the same printing and finish', async () => {
     own(db, 'Lightning Bolt', 'sta', 1, 'etched')
     own(db, 'Fire // Ice', undefined, 3)

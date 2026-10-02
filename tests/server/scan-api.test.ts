@@ -1,5 +1,4 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { scryfallToRow } from '../../src/server/cards/map.ts'
@@ -17,6 +16,7 @@ import { body, makeApp } from '../helpers/app.ts'
 import { createTestDb } from '../helpers/db.ts'
 import { fixtureCard, syntheticCard } from '../helpers/fixtures.ts'
 import { deck, inDeck } from '../helpers/library.ts'
+import { tempDir } from '../helpers/tmp.ts'
 
 const line = (text: string, y: number, x = 0.08): OcrLine => ({ text, confidence: 1, box: { x, y, w: 0.5, h: 0.02 } })
 const bottom = (...texts: string[]) => texts.map((t, i) => line(t, 0.934 + i * 0.017))
@@ -50,7 +50,7 @@ let gate: Promise<void>
 
 beforeEach(() => {
   db = createTestDb()
-  scansDir = fs.mkdtempSync(path.join(os.tmpdir(), 'binder-scans-'))
+  scansDir = tempDir('binder-scans-')
   failing = new Set()
   gate = Promise.resolve()
   lookups = createCardLookups(db)
@@ -73,10 +73,8 @@ beforeEach(() => {
   })
   app = makeApp({ db, scanner: { scansDir, worker } })
 })
-afterEach(async () => {
-  await worker.idle()
-  fs.rmSync(scansDir, { recursive: true, force: true })
-})
+// The scans folder goes once nothing is being identified (see tempDir).
+afterEach(() => worker.idle())
 
 const capture = (name: string, auto = false, query = '') =>
   app.request(`/api/scan?${auto ? 'auto=1&' : ''}${query}`, { method: 'POST', headers: { 'content-type': 'image/jpeg' }, body: photo(name) })
@@ -364,14 +362,21 @@ describe('the queue', () => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     onTestFinished(() => logged.mockRestore())
     const ready = await scan('bolt-m11')
-    fs.chmodSync(scansDir, 0o555)
-    try {
-      expect(await body(await send('POST', '/api/scan/commit'))).toEqual({ items: 1, copies: 1, decks: [] })
-    } finally {
-      fs.chmodSync(scansDir, 0o755)
-    }
+    const image = path.join(scansDir, `${ready.id}.jpg`)
+    // The image can't be deleted (a folder made read-only won't do it: root, and Windows, delete from it anyway).
+    const remove = vi.spyOn(fs, 'rmSync').mockImplementationOnce(() => {
+      throw Object.assign(new Error(`EISDIR: illegal operation on a directory, unlink '${image}'`), { code: 'EISDIR' })
+    })
+    onTestFinished(() => remove.mockRestore())
+    expect(await body(await send('POST', '/api/scan/commit'))).toEqual({ items: 1, copies: 1, decks: [] })
+    expect(remove).toHaveBeenCalledWith(image, { force: true })
     expect(owned()).toEqual([{ card_id: fixtureCard('Lightning Bolt', 'm11').id, finish: 'nonfoil', quantity: 1 }])
-    expect(logged).toHaveBeenCalledWith(`[scan] couldn't delete ${path.join(scansDir, `${ready.id}.jpg`)}`, expect.anything())
+    expect(logged).toHaveBeenCalledWith(`[scan] couldn't delete ${image}`, expect.anything())
+    // The image the commit left is deleted at the next start, its scan being finished; a scan still in the queue keeps its.
+    const review = await scan('mystery')
+    worker.recover()
+    expect(fs.existsSync(image)).toBe(false)
+    expect(fs.existsSync(path.join(scansDir, `${review.id}.jpg`))).toBe(true)
   })
 
   it('commits only the scans it is given, when given their ids', async () => {

@@ -1,15 +1,11 @@
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, onTestFinished } from 'vitest'
 import { appRunning, builtApp, installApp } from '../../scripts/lib/install.ts'
+import { tempDir } from '../helpers/tmp.ts'
 
-function scratch(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'binder-install-'))
-  onTestFinished(() => fs.rmSync(dir, { recursive: true, force: true }))
-  return dir
-}
+const scratch = () => tempDir('binder-install-')
 
 /** A stand-in Binder.app holding one file. */
 function app(dir: string, text: string): string {
@@ -32,7 +28,8 @@ describe('builtApp', () => {
   })
 })
 
-describe('installApp', () => {
+// Installing goes through /usr/bin/ditto, which keeps a Mac app's signature and symlinks: there's no ditto elsewhere.
+describe.runIf(process.platform === 'darwin')('installApp', () => {
   it('puts Binder.app in the folder, replacing the one there', () => {
     const dir = scratch()
     const built = app(path.join(dir, 'release'), 'new')
@@ -45,7 +42,8 @@ describe('installApp', () => {
   })
 })
 
-describe('appRunning', () => {
+// pgrep, and a script started by its #! line, are POSIX's: Windows has neither.
+describe.skipIf(process.platform === 'win32')('appRunning', () => {
   it('tells whether Binder.app is running from that path, so pnpm app never replaces it under itself', async () => {
     const dir = scratch()
     const bundle = path.join(dir, 'Binder.app')

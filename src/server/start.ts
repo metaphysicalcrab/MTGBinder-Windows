@@ -14,7 +14,8 @@ import { createCardLookups } from './scanner/lookups.ts'
 import { buildOcrHelper, createOcrClient } from './scanner/ocr-client.ts'
 import { createScanWorker } from './scanner/worker.ts'
 import { createScryfallClient, type ScryfallClient } from './scryfall/client.ts'
-import { listenFailure } from './startup.ts'
+import { listenFailure, locationWarnings } from './startup.ts'
+import { trustSystemCertificates } from './system-ca.ts'
 
 /** Where a Binder keeps its library and finds its parts, and where it listens (spec §6). */
 export interface BinderOptions {
@@ -46,7 +47,8 @@ export interface RunningBinder {
   port: number
   /**
    * Stops listening, then closes the OCR helper and the library. It doesn't wait for a card-data refresh or a scan in
-   * progress: it's meant to be followed by the process exiting, as Binder.app's server does.
+   * progress: it's meant to be followed by the process exiting, as the desktop app's server does. Calling it again
+   * waits for the same stop.
    */
   stop(): Promise<void>
 }
@@ -72,6 +74,9 @@ export class StartupError extends Error {
 export async function startBinder(options: BinderOptions): Promise<RunningBinder> {
   const log = options.log ?? ((line: string) => console.log(line))
   const paths = libraryPaths(options.dataDir)
+  // On Windows: a library in OneDrive, on a network share, or in too deep a folder, said before it's opened.
+  for (const warning of locationWarnings({ dataDir: options.dataDir, envPath: options.envPath })) log(warning)
+  trustSystemCertificates()
   let db: DB
   try {
     db = openDb(paths.dbPath, {
@@ -133,17 +138,21 @@ export async function startBinder(options: BinderOptions): Promise<RunningBinder
   // Only the Binder that owns the port picks up scans a restart interrupted: a second one, started while Binder runs,
   // would put the running one's scans back in the queue and then fail on the port.
   worker.recover()
+  let stopping: Promise<void> | undefined
   return {
     url,
     port,
-    async stop() {
-      await new Promise<void>((resolve, reject) => {
-        server.close((err) => (err ? reject(err) : resolve()))
-        // Connections a browser keeps open would hold close() back.
-        server.closeAllConnections()
-      })
-      ocr.close()
-      db.close()
+    stop() {
+      stopping ??= (async () => {
+        await new Promise<void>((resolve, reject) => {
+          server.close((err) => (err ? reject(err) : resolve()))
+          // Connections a browser keeps open would hold close() back.
+          server.closeAllConnections()
+        })
+        ocr.close()
+        db.close()
+      })()
+      return stopping
     },
   }
 }

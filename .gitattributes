@@ -1,0 +1,17 @@
+# Text files are kept with LF line endings, in the repository and in every checkout (a Windows one included), so a
+# commit from Windows doesn't turn whole files over to CRLF. Windows' own scripts keep CRLF, which cmd.exe and
+# Windows PowerShell 5.1 expect.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Never line-ended or diffed as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.icns binary
+*.db binary
+*.node binary
+*.gz binary

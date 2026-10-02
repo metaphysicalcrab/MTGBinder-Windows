@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { parseDecklist, toArena, toMtgo, type ExportLine } from '../../src/shared/decklist.ts'
 
+/**
+ * How long the guards against runaway regex backtracking give a parse. Backtracking gone wrong takes seconds or
+ * minutes on these inputs; a sound parse takes milliseconds, though a busy or throttled PC (a Windows laptop scanning
+ * every file it opens) can stretch that a long way, so the bound is generous.
+ */
+const QUICK_MS = 1000
+
 const brief = (text: string) => parseDecklist(text).entries.map((e) => [e.quantity, e.name, e.board, e.setCode, e.collectorNumber])
 
 describe('parseDecklist', () => {
@@ -150,7 +157,7 @@ describe('parseDecklist', () => {
     expect(line.length).toBeGreaterThan(10_000)
     const start = performance.now()
     expect(parseDecklist(line).skipped).toHaveLength(1)
-    expect(performance.now() - start).toBeLessThan(100)
+    expect(performance.now() - start).toBeLessThan(QUICK_MS)
   })
 
   it('skips a single 200,000-character line of spaces, tabs, and markers quickly', () => {
@@ -158,7 +165,7 @@ describe('parseDecklist', () => {
     expect(line.length).toBeGreaterThanOrEqual(200_000)
     const start = performance.now()
     const { entries, skipped } = parseDecklist(line)
-    expect(performance.now() - start).toBeLessThan(100)
+    expect(performance.now() - start).toBeLessThan(QUICK_MS)
     expect(entries).toEqual([])
     expect(skipped).toEqual([{ line: 1, text: line }])
   })
@@ -169,7 +176,7 @@ describe('parseDecklist', () => {
     expect(text.length).toBeGreaterThanOrEqual(180_000)
     const start = performance.now()
     const { entries, skipped } = parseDecklist(text)
-    expect(performance.now() - start).toBeLessThan(100)
+    expect(performance.now() - start).toBeLessThan(QUICK_MS)
     expect(entries).toHaveLength(count)
     expect(entries.every((e) => e.name === 'Duress' && e.board === 'side')).toBe(true)
     expect(skipped).toEqual([])
@@ -184,7 +191,7 @@ describe('parseDecklist', () => {
       expect(text.length).toBeGreaterThanOrEqual(200_000)
       const start = performance.now()
       const { entries, skipped } = parseDecklist(text)
-      expect(performance.now() - start).toBeLessThan(100)
+      expect(performance.now() - start).toBeLessThan(QUICK_MS)
       expect(entries).toHaveLength(count)
       expect(skipped).toEqual([])
     }
@@ -196,7 +203,7 @@ describe('parseDecklist', () => {
     expect(text.length).toBeGreaterThanOrEqual(200_000)
     const start = performance.now()
     const { entries, skipped } = parseDecklist(text)
-    expect(performance.now() - start).toBeLessThan(100)
+    expect(performance.now() - start).toBeLessThan(QUICK_MS)
     expect(entries).toHaveLength(Math.ceil(200_000 / block.length))
     expect(entries.every((e) => e.name === 'Lightning Bolt' && e.board === 'main' && e.setCode === 'm11')).toBe(true)
     expect(skipped).toEqual([])

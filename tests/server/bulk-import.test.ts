@@ -1,9 +1,8 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import zlib from 'node:zlib'
 import Database from 'better-sqlite3'
-import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest'
+import { beforeEach, describe, expect, it, onTestFinished } from 'vitest'
 import { createBulkImporter, importCardsFile } from '../../src/server/bulk/import.ts'
 import { CARD_DATA_VERSION } from '../../src/server/cards/map.ts'
 import { autocomplete, getCard, insertCardRows, rebuildCardNames } from '../../src/server/cards/repo.ts'
@@ -14,15 +13,14 @@ import { ScryfallError, type ScryfallClient } from '../../src/server/scryfall/cl
 import type { ScryfallCard } from '../../src/server/scryfall/types.ts'
 import { count, createTestDb, fixtureRows, tableExists } from '../helpers/db.ts'
 import { fixtureCard, loadFixtureCards, loadTokenFixtures, syntheticCard } from '../helpers/fixtures.ts'
+import { closeAtEnd, tempDir } from '../helpers/tmp.ts'
 
 const SOURCE_UPDATED_AT = '2026-09-26T09:05:51.554+00:00'
 
 let tmp: string
 beforeEach(() => {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'binder-bulk-'))
-})
-afterEach(() => {
-  fs.rmSync(tmp, { recursive: true, force: true })
+  // Removed after the databases a test opens in it are closed, even when the test fails first (see tempDir).
+  tmp = tempDir('binder-bulk-')
 })
 
 const gzLines = (lines: string[]) => zlib.gzipSync(`${lines.join('\n')}\n`)
@@ -171,8 +169,8 @@ describe('importCardsFile', () => {
 
   it('lets two connections to the same database import at the same time', async () => {
     const file = path.join(tmp, 'binder.db')
-    const a = openDb(file)
-    const b = openDb(file)
+    const a = closeAtEnd(openDb(file))
+    const b = closeAtEnd(openDb(file))
     const cards = writeFile(gzCards(loadFixtureCards()))
     let importB: Promise<unknown> = Promise.resolve('B never started')
     const importA = importCardsFile(a, cards, () => {
@@ -399,7 +397,7 @@ describe('bulk importer', () => {
     rebuildCardNames(seed)
     seed.close()
     // Every write fails on this connection, including recording bulk_error.
-    const db = new Database(file, { readonly: true })
+    const db = closeAtEnd(new Database(file, { readonly: true }))
     const logged: string[] = []
     const bulk = createBulkImporter({
       db,
@@ -421,9 +419,9 @@ describe('bulk importer', () => {
     insertCardRows(seed, 'cards', fixtureRows())
     seed.pragma('journal_mode = DELETE')
     seed.close()
-    const db = new Database(file, { timeout: 0 })
+    const db = closeAtEnd(new Database(file, { timeout: 0 }))
     // Another connection holds the file: every read on this one fails ("database is locked").
-    const locker = new Database(file)
+    const locker = closeAtEnd(new Database(file))
     locker.exec('BEGIN EXCLUSIVE')
     const logged: string[] = []
     const bulk = createBulkImporter({
@@ -453,7 +451,7 @@ describe('bulk importer', () => {
     insertCardRows(seed, 'cards', fixtureRows())
     setMeta(seed, 'bulk_error', 'Card data download failed: an older failure')
     seed.close()
-    const db = new Database(file, { readonly: true })
+    const db = closeAtEnd(new Database(file, { readonly: true }))
     const bulk = createBulkImporter({
       db,
       client: fakeClient({ metaError: new ScryfallError('offline', null, 'Scryfall is unreachable: ECONNREFUSED') }),
@@ -537,7 +535,7 @@ describe('bulk importer', () => {
     const seed = new Database(dbFile)
     seed.prepare("INSERT INTO meta (key, value) VALUES ('bulk_source_updated_at', ?)").run(SOURCE_UPDATED_AT)
     seed.close()
-    const db = new Database(dbFile, { readonly: true })
+    const db = closeAtEnd(new Database(dbFile, { readonly: true }))
     const bulk = createBulkImporter({ db, client: fakeClient({}), dataDir: tmp, log: () => {} })
     await bulk.start()
     expect(bulk.status().error).toMatch(/readonly/)
