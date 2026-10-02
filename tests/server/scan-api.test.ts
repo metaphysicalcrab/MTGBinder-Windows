@@ -7,7 +7,14 @@ import type { DB } from '../../src/server/db/index.ts'
 import { createCardLookups } from '../../src/server/scanner/lookups.ts'
 import type { CardLookups } from '../../src/server/scanner/matcher.ts'
 import type { OcrLine, OcrResult } from '../../src/server/scanner/ocr-client.ts'
-import { AUTO_ADDED_MS, countSkipped, listAutoAdded, SKIPPED_MS } from '../../src/server/scanner/repo.ts'
+import {
+  AUTO_ADDED_MS,
+  countSkipped,
+  deleteImages,
+  IMAGE_RETRY_MS,
+  listAutoAdded,
+  SKIPPED_MS,
+} from '../../src/server/scanner/repo.ts'
 import { MAX_SCAN_BYTES } from '../../src/server/scanner/routes.ts'
 import { createScanWorker, type ScanWorker } from '../../src/server/scanner/worker.ts'
 import { updateSettings } from '../../src/server/settings.ts'
@@ -377,6 +384,37 @@ describe('the queue', () => {
     worker.recover()
     expect(fs.existsSync(image)).toBe(false)
     expect(fs.existsSync(path.join(scansDir, `${review.id}.jpg`))).toBe(true)
+  })
+
+  it('on Windows, waits for held images 2 s for them all, not for each, as the wait holds up the server', () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    onTestFinished(() => logged.mockRestore())
+    vi.useFakeTimers({ toFake: ['Date'] })
+    onTestFinished(() => void vi.useRealTimers())
+    const [one, two, three] = ['1.jpg', '2.jpg', '3.jpg'].map((name) => path.join(scansDir, name))
+    for (const file of [one, two, three]) fs.writeFileSync(file!, 'jpeg')
+    // The first image is let go after two tries; the others stay open (in Explorer's preview, say).
+    const held = new Map([[one, 2], [two, Infinity], [three, Infinity]])
+    const { rmSync } = fs
+    const remove = vi.spyOn(fs, 'rmSync').mockImplementation((file, options) => {
+      const left = held.get(String(file)) ?? 0
+      if (left === 0) return rmSync(file, options)
+      held.set(String(file), left - 1)
+      throw Object.assign(new Error(`EBUSY: resource busy or locked, unlink '${String(file)}'`), { code: 'EBUSY' })
+    })
+    onTestFinished(() => remove.mockRestore())
+    const waits: number[] = []
+    const sleep = (ms: number) => {
+      waits.push(ms)
+      vi.advanceTimersByTime(ms)
+    }
+    deleteImages(scansDir, ['1.jpg', '2.jpg', '3.jpg'].map((image_path) => ({ image_path })), { platform: 'win32', sleep })
+    expect(waits.reduce((sum, ms) => sum + ms, 0)).toBe(IMAGE_RETRY_MS)
+    // The second image waits what the first left; the third, with none left, is tried once and left for the next start.
+    const tries = (file: string) => remove.mock.calls.filter(([target]) => target === file).length
+    expect([tries(one!), tries(two!), tries(three!)]).toEqual([3, waits.length - 1, 1])
+    expect([one, two, three].map((file) => fs.existsSync(file!))).toEqual([false, true, true])
+    expect(logged.mock.calls.map(([line]) => line)).toEqual([`[scan] couldn't delete ${two}`, `[scan] couldn't delete ${three}`])
   })
 
   it('commits only the scans it is given, when given their ids', async () => {

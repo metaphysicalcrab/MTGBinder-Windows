@@ -15,7 +15,7 @@ import { parsePrices } from '../cards/repo.ts'
 import { adjustCopies } from '../collection/repo.ts'
 import type { DB } from '../db/index.ts'
 import { addToDeck } from '../decks/repo.ts'
-import { removeWithRetry } from '../fs-retry.ts'
+import { removeWithRetry, type RetryOptions } from '../fs-retry.ts'
 
 export interface ScanRow {
   id: number
@@ -302,26 +302,36 @@ export function updateScan(db: DB, id: number, patch: ScanPatch, now = new Date(
 }
 
 /**
- * How long deleting a scan's image waits on Windows for a program that still has it open (antivirus, the OCR helper):
- * briefly, as the request adding the scan waits too. One left behind is deleted at the next start.
+ * How long deleting scans' images waits on Windows for programs that still have them open (antivirus, the OCR helper,
+ * Explorer's preview): briefly, and for all the images one request deletes together, not for each, as the wait blocks
+ * the whole server. Committing 30 held images waits 2 s, not a minute. One left behind is deleted at the next start.
  */
-const IMAGE_RETRY_MS = 2_000
+export const IMAGE_RETRY_MS = 2_000
 
 /**
- * Deletes a scan's image. Failing to (a folder that became read-only, or on Windows a file another program holds) is
- * logged: the scan is done with anyway, and removeFinishedImages deletes the image at the next start.
+ * Deletes scans' images. On Windows, held ones are tried again within one IMAGE_RETRY_MS for them all; once it's spent,
+ * each image left is tried once. Failing to delete one (a folder that became read-only, or a file another program
+ * holds) is logged: the scan is done with anyway, and removeFinishedImages deletes the image at the next start.
  */
-function deleteImage(scansDir: string, row: ScanRow) {
-  const file = scanImageFile(scansDir, row)
-  try {
-    if (file) removeWithRetry(file, { budgetMs: IMAGE_RETRY_MS })
-  } catch (err) {
-    console.error(`[scan] couldn't delete ${file}`, err)
+export function deleteImages(
+  scansDir: string,
+  rows: ReadonlyArray<Pick<ScanRow, 'image_path'>>,
+  options: RetryOptions = {},
+): void {
+  const deadline = Date.now() + (options.budgetMs ?? IMAGE_RETRY_MS)
+  for (const row of rows) {
+    const file = scanImageFile(scansDir, row)
+    if (!file) continue
+    try {
+      removeWithRetry(file, { ...options, budgetMs: Math.max(0, deadline - Date.now()) })
+    } catch (err) {
+      console.error(`[scan] couldn't delete ${file}`, err)
+    }
   }
 }
 
 /**
- * Deletes the images that adding or discarding their scans couldn't (see deleteImage). Only the image of a finished
+ * Deletes the images that adding or discarding their scans couldn't (see deleteImages). Only the image of a finished
  * scan (added, or discarded) goes: an image whose scan is still in the queue, or that no scan names, is left alone.
  * Best effort; returns how many it deleted.
  */
@@ -354,7 +364,7 @@ export function discardScan(db: DB, scansDir: string, id: number, now = new Date
   const row = getRow(db, id)
   if (!row || row.status === 'committed' || row.status === 'discarded') return false
   db.prepare("UPDATE scan_items SET status = 'discarded', updated_at = ? WHERE id = ?").run(now.toISOString(), id)
-  deleteImage(scansDir, row)
+  deleteImages(scansDir, [row])
   return true
 }
 
@@ -371,7 +381,7 @@ export function dropBareMat(db: DB, scansDir: string, id: number, ocrJson: strin
        WHERE id = ? AND status = 'identifying'`,
     )
     .run(ocrJson, now.toISOString(), id).changes
-  if (row && dropped === 1) deleteImage(scansDir, row)
+  if (row && dropped === 1) deleteImages(scansDir, [row])
 }
 
 /** How long a dropped bare-mat capture counts in the queue's `skipped`, for the Scan page's note. */
@@ -468,7 +478,7 @@ export function commitScans(
     }
     return confident
   })()
-  for (const row of rows) deleteImage(scansDir, row)
+  deleteImages(scansDir, rows)
   const decks = new Map<number, ScanCommitResult['decks'][number]>()
   for (const row of rows) {
     if (row.deck_id === null) continue

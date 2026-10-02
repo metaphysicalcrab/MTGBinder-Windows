@@ -1,12 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseDecklist, toArena, toMtgo, type ExportLine } from '../../src/shared/decklist.ts'
-
-/**
- * How long the guards against runaway regex backtracking give a parse. Backtracking gone wrong takes seconds or
- * minutes on these inputs; a sound parse takes milliseconds, though a busy or throttled PC (a Windows laptop scanning
- * every file it opens) can stretch that a long way, so the bound is generous.
- */
-const QUICK_MS = 1000
+import { QUICK_MS } from '../helpers/timing.ts'
 
 const brief = (text: string) => parseDecklist(text).entries.map((e) => [e.quantity, e.name, e.board, e.setCode, e.collectorNumber])
 
