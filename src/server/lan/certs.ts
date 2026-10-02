@@ -12,8 +12,9 @@ import { removeWithRetry, renameWithRetryAsync } from '../fs-retry.ts'
 /**
  * Phone access over HTTPS: Binder's own certificate authority, which the owner installs on the phone once, and the
  * server certificate it signs for the PC's addresses. The authority can vouch only for private addresses (10/8,
- * 172.16/12, 192.168/16 and loopback) and local names: its key lives on the PC, and an authority without those name
- * constraints, trusted by the phone, would let anyone holding that key intercept the phone's traffic to any site.
+ * 172.16/12, 192.168/16 and loopback) and local names, and only for websites (no email address or URI, and server
+ * certificates alone): its key lives on the PC, and an authority without those limits, trusted by the phone, would let
+ * anyone holding that key intercept the phone's traffic to any site, or sign mail its mail app trusts as anyone's.
  *
  * The files are kept in `<library>/lan/`, outside binder.db, so backups and move-library never carry the key, each
  * private to its owner.
@@ -30,7 +31,10 @@ const ALGORITHM = { name: 'ECDSA', namedCurve: 'P-256', hash: 'SHA-256' }
 const DAY_MS = 86_400_000
 /** How long the authority lasts: phones install it again only after this, or a rotation. */
 const AUTHORITY_YEARS = 10
-/** How long a server certificate lasts: 397 days, the most browsers accept from a public authority. */
+/**
+ * How long a server certificate lasts, counted from its start (the day before it's issued): 397 days, inside the 398
+ * Safari and Chrome allow a public authority's, should a phone ever hold Binder's to that too.
+ */
 const LEAF_DAYS = 397
 /** A certificate with fewer days than this left is replaced. */
 const RENEW_DAYS = 30
@@ -100,7 +104,8 @@ export interface LanCertificates extends AuthorityInfo {
 /**
  * The HTTPS listener's certificates: the authority, made once, and a server certificate, issued again whenever the
  * addresses or names change, fewer than 30 days remain, or the authority changed. Missing, damaged or mismatched
- * files are made again (the authority too, which phones must then install again: `authority` says so).
+ * files are made again (the authority too, which phones must then install again: `authority` says so). An authority
+ * file that's there but can't be read (another program holding it) fails the call instead, replacing nothing.
  */
 export function ensureCertificates(options: CertificateOptions): Promise<LanCertificates> {
   return oneAtATime(options.dir, () => certificates(options, false))
@@ -111,7 +116,10 @@ export function rotateAuthority(options: CertificateOptions): Promise<LanCertifi
   return oneAtATime(options.dir, () => certificates(options, true))
 }
 
-/** The authority in `dir`, for the setup page; null when there's none, or none that's usable. */
+/**
+ * The authority in `dir`, for the setup page; null when there's none, or none that's usable. Throws when its files
+ * are there but can't be read.
+ */
 export function readAuthority(dir: string, now = new Date()): AuthorityInfo | null {
   const authority = loadAuthority(dir, now)
   return authority && authorityInfo(authority)
@@ -173,26 +181,47 @@ function authorityInfo(ca: Authority): AuthorityInfo {
   }
 }
 
+/** Whether a certificate has at least RENEW_DAYS left. */
+const lasting = (cert: x509.X509Certificate, now: Date) =>
+  cert.notAfter.getTime() - now.getTime() >= RENEW_DAYS * DAY_MS
+
 /** Whether a certificate is valid now, with at least RENEW_DAYS left. */
 const current = (cert: x509.X509Certificate, now: Date) =>
-  cert.notBefore.getTime() <= now.getTime() && cert.notAfter.getTime() - now.getTime() >= RENEW_DAYS * DAY_MS
+  cert.notBefore.getTime() <= now.getTime() && lasting(cert, now)
 
-/** The authority in `dir`, if both its files are there, match, and it's one of Binder's, current; else null. */
-function loadAuthority(dir: string, now: Date): Authority | null {
+/** A file's contents, or null when it isn't there. Any other failure (another program holding it) is thrown. */
+function readIfThere(file: string): Buffer | null {
   try {
-    const cert = new crypto.X509Certificate(fs.readFileSync(path.join(dir, CA_CERT)))
-    const keyPem = fs.readFileSync(path.join(dir, CA_KEY), 'utf8')
+    return fs.readFileSync(file)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw err
+  }
+}
+
+/**
+ * The authority in `dir`, if both its files are there, match, and it's one of Binder's with time left; else null. One
+ * not valid yet is kept: a PC clock set back (a flat CMOS battery) mustn't replace the authority phones installed.
+ */
+function loadAuthority(dir: string, now: Date): Authority | null {
+  const file = readIfThere(path.join(dir, CA_CERT))
+  const key = readIfThere(path.join(dir, CA_KEY))
+  if (!file || !key) return null
+  try {
+    const cert = new crypto.X509Certificate(file)
+    const keyPem = key.toString('utf8')
     const parsed = new x509.X509Certificate(cert.raw)
     const basic = parsed.getExtension(x509.BasicConstraintsExtension)
+    const usages = parsed.getExtension(x509.ExtendedKeyUsageExtension)?.usages
     const extension = parsed.getExtension(NAME_CONSTRAINTS)
-    if (!basic?.ca || !extension?.critical) return null
+    if (!basic?.ca || usages?.join() !== x509.ExtendedKeyUsage.serverAuth || !extension?.critical) return null
     const constraints = decodeConstraints(new Uint8Array(extension.value))
-    // Both kinds of name must be constrained: a kind with no subtree at all would be unconstrained.
-    if (constraints.ranges.length === 0 || constraints.dnsNames.length === 0) return null
+    // Every kind of name must be constrained: a kind with no subtree at all would be unconstrained.
+    if (Object.values(constraints).some((subtrees) => subtrees.length === 0)) return null
     if (!cert.verify(cert.publicKey) || !cert.checkPrivateKey(crypto.createPrivateKey(keyPem))) return null
-    return current(parsed, now) ? { cert, parsed, keyPem, constraints } : null
+    return lasting(parsed, now) ? { cert, parsed, keyPem, constraints } : null
   } catch {
-    return null // missing or unreadable
+    return null // damaged
   }
 }
 
@@ -218,6 +247,8 @@ async function createAuthority(options: CertificateOptions, now: Date): Promise<
   const constraints: Constraints = {
     ranges: PRIVATE_RANGES.map(([address, bits]) => range(address, bits)),
     dnsNames: authorityNames(options.hostnames),
+    emails: [NOTHING],
+    uris: [NOTHING],
   }
   const notAfter = new Date(now)
   notAfter.setUTCFullYear(notAfter.getUTCFullYear() + AUTHORITY_YEARS)
@@ -233,14 +264,16 @@ async function createAuthority(options: CertificateOptions, now: Date): Promise<
     extensions: [
       new x509.BasicConstraintsExtension(true, 0, true), // signs server certificates, never another authority
       new x509.KeyUsagesExtension(x509.KeyUsageFlags.keyCertSign | x509.KeyUsageFlags.cRLSign, true),
+      new x509.ExtendedKeyUsageExtension([x509.ExtendedKeyUsage.serverAuth]), // server certificates alone, never mail
       await x509.SubjectKeyIdentifierExtension.create(keys.publicKey as CryptoKey),
       new x509.Extension(NAME_CONSTRAINTS, true, encodeConstraints(constraints)),
     ],
   })
+  const cert = new crypto.X509Certificate(Buffer.from(parsed.rawData))
   const keyPem = privateKeyPem(keys.privateKey)
   await writePrivate(path.join(options.dir, CA_KEY), keyPem, options)
-  await writePrivate(path.join(options.dir, CA_CERT), parsed.toString('pem'), options)
-  return { cert: new crypto.X509Certificate(Buffer.from(parsed.rawData)), parsed, keyPem, constraints }
+  await writePrivate(path.join(options.dir, CA_CERT), cert.toString(), options)
+  return { cert, parsed, keyPem, constraints }
 }
 
 async function issueLeaf(options: CertificateOptions, ca: Authority, names: Names, now: Date): Promise<Leaf> {
@@ -248,12 +281,13 @@ async function issueLeaf(options: CertificateOptions, ca: Authority, names: Name
   const caKey = crypto.createPrivateKey(ca.keyPem).export({ type: 'pkcs8', format: 'der' })
   const signingKey = await crypto.webcrypto.subtle.importKey('pkcs8', caKey, ALGORITHM, false, ['sign'])
   const authorityKeyId = ca.parsed.getExtension(x509.SubjectKeyIdentifierExtension)?.keyId
+  const notBefore = new Date(now.getTime() - DAY_MS)
   const parsed = await x509.X509CertificateGenerator.create({
     serialNumber: serialNumber(),
     subject: [{ CN: [`Binder on ${options.computerName ?? os.hostname()}`] }],
     issuer: ca.parsed.subjectName,
-    notBefore: new Date(now.getTime() - DAY_MS),
-    notAfter: new Date(Math.min(now.getTime() + LEAF_DAYS * DAY_MS, ca.parsed.notAfter.getTime())),
+    notBefore,
+    notAfter: new Date(Math.min(notBefore.getTime() + LEAF_DAYS * DAY_MS, ca.parsed.notAfter.getTime())),
     publicKey: keys.publicKey as CryptoKey,
     signingKey: signingKey as CryptoKey,
     signingAlgorithm: ALGORITHM,
@@ -270,10 +304,12 @@ async function issueLeaf(options: CertificateOptions, ca: Authority, names: Name
       await x509.SubjectKeyIdentifierExtension.create(keys.publicKey as CryptoKey),
     ],
   })
+  const cert = new crypto.X509Certificate(Buffer.from(parsed.rawData))
   const keyPem = privateKeyPem(keys.privateKey)
   await writePrivate(path.join(options.dir, LEAF_KEY), keyPem, options)
-  await writePrivate(path.join(options.dir, LEAF_CERT), parsed.toString('pem'), options)
-  return { cert: new crypto.X509Certificate(Buffer.from(parsed.rawData)), parsed, keyPem }
+  // Written as served: ending in a newline, so the files joined (`leaf.pem` then `ca.pem`) are the chain.
+  await writePrivate(path.join(options.dir, LEAF_CERT), cert.toString(), options)
+  return { cert, parsed, keyPem }
 }
 
 const privateKeyPem = (key: crypto.webcrypto.CryptoKey) =>
@@ -288,12 +324,18 @@ function serialNumber(): string {
 
 // Which names an authority may vouch for
 
-/** Name constraints' permitted subtrees: IPv4 ranges (an address and its mask), and DNS names. */
+/** Name constraints' permitted subtrees: IPv4 ranges (an address and its mask), DNS names, emails and URIs. */
 interface Constraints {
   ranges: Array<{ address: Uint8Array; mask: Uint8Array }>
   /** Each permits itself and every name under it (`local` permits `desktop-abc.local`), as RFC 5280 has it. */
   dnsNames: string[]
+  /** Email addresses (rfc822Name) and URIs: only those at NOTHING, so a certificate naming any real one is refused. */
+  emails: string[]
+  uris: string[]
 }
+
+/** A host no email address or URI is at: `invalid` is reserved, and never resolves (RFC 6761). */
+const NOTHING = 'invalid'
 
 function range(address: string, bits: number): Constraints['ranges'][number] {
   const mask = [0, 1, 2, 3].map((i) => (0xff << (8 - Math.max(0, Math.min(8, bits - 8 * i)))) & 0xff)
@@ -344,12 +386,22 @@ function coveredNames(constraints: Constraints, addresses: readonly string[], ho
 // Binder's own dependencies, so the few bytes are written and read here:
 //   NameConstraints ::= SEQUENCE { permittedSubtrees [0] GeneralSubtrees }
 //   GeneralSubtrees ::= SEQUENCE OF GeneralSubtree, GeneralSubtree ::= SEQUENCE { base GeneralName }
-//   GeneralName: iPAddress [7] (address and mask), dNSName [2] (IA5String)
+//   GeneralName: iPAddress [7] (address and mask); rfc822Name [1], dNSName [2] and uniformResourceIdentifier [6]
+//   (IA5String)
 
 const SEQUENCE = 0x30
 const PERMITTED = 0xa0
 const IP_ADDRESS = 0x87
+const EMAIL = 0x81
 const DNS_NAME = 0x82
+const URI = 0x86
+
+/** The kinds of name given as text, by their tags (decodeConstraints). */
+const TEXT_NAMES: Readonly<Record<number, 'emails' | 'dnsNames' | 'uris'>> = {
+  [EMAIL]: 'emails',
+  [DNS_NAME]: 'dnsNames',
+  [URI]: 'uris',
+}
 
 function der(tag: number, ...contents: Uint8Array[]): Buffer<ArrayBuffer> {
   const body = Buffer.concat(contents)
@@ -358,10 +410,14 @@ function der(tag: number, ...contents: Uint8Array[]): Buffer<ArrayBuffer> {
   return Buffer.concat([Uint8Array.from([tag, ...length]), body])
 }
 
-function encodeConstraints({ ranges, dnsNames }: Constraints): Buffer<ArrayBuffer> {
+function encodeConstraints({ ranges, dnsNames, emails, uris }: Constraints): Buffer<ArrayBuffer> {
+  const text = (tag: number, names: string[]) =>
+    names.map((name) => der(SEQUENCE, der(tag, Buffer.from(name, 'ascii'))))
   const subtrees = [
     ...ranges.map((r) => der(SEQUENCE, der(IP_ADDRESS, r.address, r.mask))),
-    ...dnsNames.map((name) => der(SEQUENCE, der(DNS_NAME, Buffer.from(name, 'ascii')))),
+    ...text(DNS_NAME, dnsNames),
+    ...text(EMAIL, emails),
+    ...text(URI, uris),
   ]
   return der(SEQUENCE, der(PERMITTED, ...subtrees))
 }
@@ -391,16 +447,17 @@ function elements(bytes: Uint8Array): Array<{ tag: number; contents: Uint8Array 
 function decodeConstraints(value: Uint8Array): Constraints {
   const [outer, ...rest] = elements(value)
   if (outer?.tag !== SEQUENCE || rest.length > 0) throw new Error('Not name constraints')
-  const constraints: Constraints = { ranges: [], dnsNames: [] }
+  const constraints: Constraints = { ranges: [], dnsNames: [], emails: [], uris: [] }
   for (const part of elements(outer.contents)) {
     if (part.tag !== PERMITTED) throw new Error('Name constraints Binder never writes')
     for (const subtree of elements(part.contents)) {
       const [base, ...bounds] = subtree.tag === SEQUENCE ? elements(subtree.contents) : []
       if (!base || bounds.length > 0) throw new Error('Name constraints Binder never writes')
+      const kind = TEXT_NAMES[base.tag]
       if (base.tag === IP_ADDRESS && base.contents.length === 8) {
         constraints.ranges.push({ address: base.contents.subarray(0, 4), mask: base.contents.subarray(4) })
-      } else if (base.tag === DNS_NAME) {
-        constraints.dnsNames.push(Buffer.from(base.contents).toString('ascii'))
+      } else if (kind) {
+        constraints[kind].push(Buffer.from(base.contents).toString('ascii'))
       } else {
         throw new Error('Name constraints Binder never writes')
       }

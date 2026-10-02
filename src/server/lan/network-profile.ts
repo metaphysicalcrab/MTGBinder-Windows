@@ -18,8 +18,11 @@ export interface NetworkProfile {
 export type RunCommand = (command: string, args: string[]) => Promise<string>
 
 export interface NetworkProfileOptions {
-  /** The adapter the phones' address is on, as os.networkInterfaces() names it ("Wi-Fi"). Default: the first network. */
-  interfaceName?: string
+  /**
+   * The adapter the phones' address is on, as os.networkInterfaces() names it ("Wi-Fi"). Not the first network Windows
+   * lists, which on a PC with WSL or Hyper-V is often their virtual adapter's ("vEthernet (WSL)").
+   */
+  interfaceName: string
   exec?: RunCommand
   /** Default: this platform. Anywhere but Windows the answer is null. */
   platform?: NodeJS.Platform
@@ -57,11 +60,11 @@ const run: RunCommand = async (command, args) =>
 const cache = new WeakMap<RunCommand, { at: number; profiles: Promise<Profile[] | null> }>()
 
 /**
- * On Windows, the network profile of the adapter phones reach the PC through (or of the first network); null on
- * other platforms, and when it can't be told: no such network, or PowerShell failed, timed out or answered something
- * unexpected. Answers, failures included, are kept for a minute.
+ * On Windows, the network profile of the adapter phones reach the PC through; null on other platforms, and when it
+ * can't be told: no such network, or PowerShell failed, timed out or answered something unexpected. Answers, failures
+ * included, are kept for a minute.
  */
-export async function windowsNetworkProfile(options: NetworkProfileOptions = {}): Promise<NetworkProfile | null> {
+export async function windowsNetworkProfile(options: NetworkProfileOptions): Promise<NetworkProfile | null> {
   const { platform = process.platform, exec = run, now = new Date(), env = process.env } = options
   if (platform !== 'win32') return null
   let cached = cache.get(exec)
@@ -71,9 +74,8 @@ export async function windowsNetworkProfile(options: NetworkProfileOptions = {})
     cache.set(exec, cached)
   }
   const profiles = await cached.profiles
-  const wanted = options.interfaceName?.toLowerCase()
-  const profile =
-    wanted === undefined ? profiles?.[0] : profiles?.find((p) => p.InterfaceAlias.toLowerCase() === wanted)
+  const wanted = options.interfaceName.toLowerCase()
+  const profile = profiles?.find((p) => p.InterfaceAlias.toLowerCase() === wanted)
   if (!profile) return null
   const category = profile.NetworkCategory
   return {

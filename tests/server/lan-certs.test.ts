@@ -112,7 +112,7 @@ describe('certificates for phone access over HTTPS (lan/certs)', () => {
       caName: 'Binder on DESKTOP-ABC1 (2026-10-02)',
       addresses: ['192.168.1.5', '127.0.0.1'],
       hostnames: ['desktop-abc1', 'desktop-abc1.local'],
-      expiresAt: new Date(NOW.getTime() + 397 * DAY),
+      expiresAt: new Date(NOW.getTime() + 396 * DAY), // 397 days from the day before
       reissued: true,
       authority: 'created',
     })
@@ -127,20 +127,25 @@ describe('certificates for phone access over HTTPS (lan/certs)', () => {
     expect([basic.critical, basic.ca, basic.pathLength]).toEqual([true, true, 0])
     const usage = ca.getExtension(x509.KeyUsagesExtension)!
     expect([usage.critical, usage.usages]).toEqual([true, x509.KeyUsageFlags.keyCertSign | x509.KeyUsageFlags.cRLSign])
+    // Server certificates alone: no certificate from it is good for mail or signing code.
+    expect(ca.getExtension(x509.ExtendedKeyUsageExtension)!.usages).toEqual([x509.ExtendedKeyUsage.serverAuth])
     const keyId = ca.getExtension(x509.SubjectKeyIdentifierExtension)!.keyId
     expect(keyId).toMatch(/^[0-9a-f]{40}$/)
     const constraints = ca.getExtension('2.5.29.30')!
     expect(constraints.critical).toBe(true)
-    // NameConstraints { permittedSubtrees [0] { iPAddress [7] address+mask, …, dNSName [2] name, … } }
+    // NameConstraints { permittedSubtrees [0] { iPAddress [7] address+mask, …, dNSName [2] name, …, rfc822Name [1]
+    // and uniformResourceIdentifier [6] `invalid`, which no email address or URI is at } }
     expect(Buffer.from(constraints.value).toString('hex')).toBe(
       [
-        '304b', 'a049',
+        '3061', 'a05f',
         '300a8708', '0a000000', 'ff000000', // 10.0.0.0/8
         '300a8708', 'ac100000', 'fff00000', // 172.16.0.0/12
         '300a8708', 'c0a80000', 'ffff0000', // 192.168.0.0/16
         '300a8708', '7f000000', 'ff000000', // 127.0.0.0/8
         '30078205', Buffer.from('local').toString('hex'),
         '300e820c', Buffer.from('desktop-abc1').toString('hex'),
+        '30098107', Buffer.from('invalid').toString('hex'),
+        '30098607', Buffer.from('invalid').toString('hex'),
       ].join(''),
     )
 
@@ -148,7 +153,7 @@ describe('certificates for phone access over HTTPS (lan/certs)', () => {
     const leaf = new x509.X509Certificate(leafPem!)
     expect(leaf.issuer).toBe(ca.subject)
     expect(leaf.notBefore).toEqual(new Date('2026-10-01T12:00:00Z'))
-    expect(leaf.notAfter).toEqual(new Date('2027-11-03T12:00:00Z'))
+    expect(leaf.notAfter).toEqual(new Date('2027-11-02T12:00:00Z'))
     const leafBasic = leaf.getExtension(x509.BasicConstraintsExtension)!
     expect([leafBasic.critical, leafBasic.ca]).toEqual([true, false])
     const leafUsage = leaf.getExtension(x509.KeyUsagesExtension)!
@@ -172,6 +177,9 @@ describe('certificates for phone access over HTTPS (lan/certs)', () => {
 
     expect(fs.readdirSync(o.dir).sort()).toEqual(FILES)
     for (const file of FILES) expectOwnerOnly(path.join(o.dir, file))
+    // Each file ends in a newline, so the two certificates joined are the chain too.
+    const read = (file: string) => fs.readFileSync(path.join(o.dir, file), 'utf8')
+    expect(read('leaf.pem') + read('ca.pem')).toBe(result.cert)
   })
 
   it('serves HTTPS a client trusting only the authority accepts, for the addresses it names and no others', async () => {
@@ -196,6 +204,9 @@ describe('certificates for phone access over HTTPS (lan/certs)', () => {
       [{ type: 'dns', value: 'desktop-abc1.example.com' }],
       // One name outside the constraints spoils a certificate's others.
       [{ type: 'ip', value: '192.168.1.5' }, { type: 'dns', value: 'example.com' }],
+      // No email address or URI at all (a phone's mail app would trust one for signed mail).
+      [{ type: 'ip', value: '192.168.1.5' }, { type: 'email', value: 'someone@example.com' }],
+      [{ type: 'ip', value: '192.168.1.5' }, { type: 'url', value: 'https://example.com/' }],
     ] as const
     for (const names of refused) {
       const fake = await forged(o.dir, [...names])
@@ -233,9 +244,9 @@ describe('certificates for phone access over HTTPS (lan/certs)', () => {
     const o = options()
     const at = (days: number) => ({ ...o, now: new Date(NOW.getTime() + days * DAY) })
     const first = await ensureCertificates(at(0))
-    expect(await ensureCertificates(at(367))).toMatchObject({ reissued: false, authority: 'kept' })
-    const renewed = await ensureCertificates(at(368))
-    expect(renewed).toMatchObject({ reissued: true, authority: 'kept', expiresAt: new Date(NOW.getTime() + 765 * DAY) })
+    expect(await ensureCertificates(at(366))).toMatchObject({ reissued: false, authority: 'kept' })
+    const renewed = await ensureCertificates(at(367))
+    expect(renewed).toMatchObject({ reissued: true, authority: 'kept', expiresAt: new Date(NOW.getTime() + 763 * DAY) })
     expect(renewed.caFingerprint).toBe(first.caFingerprint)
 
     // The authority lasts until 2036-10-02: a server certificate never outlasts it, and with 30 days left it's replaced.
@@ -292,15 +303,17 @@ describe('certificates for phone access over HTTPS (lan/certs)', () => {
     expect(await ensureCertificates(o)).toMatchObject({ reissued: true, authority: 'kept', caFingerprint: first.caFingerprint })
   })
 
-  it('makes a new authority when its files are missing, damaged or mismatched, or it has no name constraints', async () => {
+  it('makes a new authority when its files are missing, damaged or mismatched, or it lacks one of its limits', async () => {
     const o = options()
-    const unconstrained = async () => {
+    /** An authority like Binder's but for its extensions, which `extensions` makes from the one in place. */
+    const authorityWith = (extensions: (ca: x509.X509Certificate) => x509.Extension[]) => async () => {
+      const current = new x509.X509Certificate(fs.readFileSync(path.join(o.dir, 'ca.pem'), 'utf8'))
       const keys = await crypto.webcrypto.subtle.generateKey(ALGORITHM, true, ['sign', 'verify'])
       const ca = await x509.X509CertificateGenerator.createSelfSigned({
         name: 'CN=Binder on DESKTOP-ABC1',
         keys: keys as CryptoKeyPair,
         signingAlgorithm: ALGORITHM,
-        extensions: [new x509.BasicConstraintsExtension(true, 0, true)],
+        extensions: [new x509.BasicConstraintsExtension(true, 0, true), ...extensions(current)],
       })
       fs.writeFileSync(path.join(o.dir, 'ca.pem'), ca.toString('pem'))
       fs.writeFileSync(
@@ -308,12 +321,18 @@ describe('certificates for phone access over HTTPS (lan/certs)', () => {
         crypto.KeyObject.from(keys.privateKey).export({ type: 'pkcs8', format: 'pem' }),
       )
     }
+    const serverOnly = new x509.ExtendedKeyUsageExtension([x509.ExtendedKeyUsage.serverAuth])
+    const constraints = (value: string) => new x509.Extension('2.5.29.30', true, Buffer.from(value, 'hex'))
+    const hex = (text: string) => Buffer.from(text).toString('hex')
     const damages: Array<() => void | Promise<void>> = [
       () => fs.writeFileSync(path.join(o.dir, 'ca.pem'), 'not a certificate'),
       () => fs.rmSync(path.join(o.dir, 'ca-key.pem')),
       () => fs.copyFileSync(path.join(o.dir, 'leaf-key.pem'), path.join(o.dir, 'ca-key.pem')),
       () => fs.copyFileSync(path.join(o.dir, 'leaf.pem'), path.join(o.dir, 'ca.pem')), // not an authority
-      unconstrained,
+      authorityWith(() => [serverOnly]), // no name constraints
+      // Addresses (10/8) and names (local) constrained, but not email addresses or URIs.
+      authorityWith(() => [serverOnly, constraints('3017a015300a87080a000000ff00000030078205' + hex('local'))]),
+      authorityWith((current) => [current.getExtension('2.5.29.30')!]), // good for mail or signing code
     ]
     let before = (await ensureCertificates(o)).caFingerprint
     for (const damage of damages) {
@@ -325,6 +344,39 @@ describe('certificates for phone access over HTTPS (lan/certs)', () => {
       expectWholeChain(result)
       before = result.caFingerprint
     }
+  })
+
+  it("keeps the authority through a PC clock set back, and replaces nothing when a file can't be read", async () => {
+    const o = options()
+    const first = await ensureCertificates({ ...o, now: NOW })
+    // A flat CMOS battery, or a clock set by hand: days or years behind, it's still the authority phones installed.
+    for (const behind of [2 * DAY, 5 * 365 * DAY]) {
+      const now = new Date(NOW.getTime() - behind)
+      expect(await ensureCertificates({ ...o, now })).toMatchObject({ authority: 'kept', caFingerprint: first.caFingerprint })
+      expect(readAuthority(o.dir, now)?.caFingerprint).toBe(first.caFingerprint)
+    }
+    const fixed = await ensureCertificates({ ...o, now: NOW })
+    expect(fixed).toMatchObject({ authority: 'kept', caFingerprint: first.caFingerprint })
+
+    // A file there that another program holds (antivirus, on Windows) fails the call; it isn't a missing one.
+    const busy = Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' })
+    const read = vi.spyOn(fs, 'readFileSync')
+    onTestFinished(() => read.mockRestore())
+    read.mockImplementationOnce(() => {
+      throw busy
+    })
+    await expect(ensureCertificates({ ...o, now: NOW })).rejects.toBe(busy)
+    read.mockImplementationOnce(() => {
+      throw busy
+    })
+    expect(() => readAuthority(o.dir, NOW)).toThrow(busy)
+    read.mockRestore()
+    expect(await ensureCertificates({ ...o, now: NOW })).toMatchObject({
+      authority: 'kept',
+      reissued: false,
+      caFingerprint: first.caFingerprint,
+      leafFingerprint: fixed.leafFingerprint,
+    })
   })
 
   it("leaves out of the server certificate what the authority can't vouch for, and a name it wasn't made for", async () => {
