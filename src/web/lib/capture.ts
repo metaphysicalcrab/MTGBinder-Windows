@@ -117,21 +117,26 @@ export const NEW_CARD_THRESHOLD = 12
 
 /**
  * How likely a camera is the one mounted over the scanning area, from its label, best first: an iPhone (Continuity
- * Camera), then any other camera, then the Mac's own, then Desk View and virtual cameras (made from another camera's
- * picture). A renamed iPhone's camera is named after the phone ("Kason's Phone Camera"), so any camera that isn't the
- * Mac's own is the next best guess.
+ * Camera), a phone's or tablet's back camera ("camera2 0, facing back" on Android, "Microsoft Camera Rear" on a
+ * Surface) or a document camera; then any other camera; then the computer's own, facing the owner (a Mac's FaceTime
+ * camera, a Windows laptop's "Integrated Webcam", "HD User Facing" or "HP TrueVision HD Camera", a phone's front
+ * camera); then Desk View and virtual cameras (made from another camera's picture). A renamed iPhone's camera is named
+ * after the phone ("Kason's Phone Camera"), so any camera that isn't the computer's own is the next best guess: a USB
+ * webcam, say.
  */
 export function cameraRank(label: string): number {
   if (/desk view|virtual/i.test(label)) return 3
-  if (/iphone/i.test(label)) return 0
-  if (/facetime|built-in|macbook|imac|studio display/i.test(label)) return MAC_CAMERA_RANK
+  if (/iphone|\bback\b|\brear\b|environment|document|ipevo|czur/i.test(label)) return 0
+  if (/facetime|built-in|macbook|imac|studio display|integrated|user facing|\bfront\b|truevision|wide vision|easycamera/i.test(label)) {
+    return BUILT_IN_CAMERA_RANK
+  }
   return 1
 }
 /**
- * The rank of the Mac's own cameras. A camera ranked this or worse (this number or higher: the Mac's own, Desk View, a
- * virtual camera) isn't one mounted for scanning.
+ * The rank of the computer's own cameras, which face the owner (and a phone's front camera). A camera ranked this or
+ * worse (this number or higher: the computer's own, Desk View, a virtual camera) isn't one mounted for scanning.
  */
-export const MAC_CAMERA_RANK = 2
+export const BUILT_IN_CAMERA_RANK = 2
 
 /** The camera to use: the one chosen before while it's there, else the best by cameraRank (the first of equals). */
 export function preferredCamera<Device extends { deviceId: string; label: string }>(
@@ -146,8 +151,8 @@ export function preferredCamera<Device extends { deviceId: string; label: string
 }
 
 /**
- * The camera to use once one has stopped (`lostId`: unplugged, or the iPhone moved away): that camera while it's
- * listed, else none until it's back or the owner picks another. Switching by itself to the next best (a MacBook's own
+ * The camera to use once one has stopped (`lostId`: unplugged, or the phone moved away): that camera while it's
+ * listed, else none until it's back or the owner picks another. Switching by itself to the next best (a laptop's own
  * camera, facing the owner) would keep auto mode capturing the wrong picture without anyone choosing it. With no
  * camera stopped, preferredCamera's choice.
  */
