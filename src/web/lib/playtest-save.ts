@@ -4,8 +4,8 @@ import { ApiRequestError } from './api.ts'
 /**
  * Saving the playtest's actions (spec §5.9.7): the page plays each action at once and sends it to the server behind
  * any not yet saved, one at a time, in order. A save the server can't be reached for is tried again, waiting longer
- * each time; one the server refuses (the game changed in another window, or an action it can't apply) drops the rest,
- * and the page reloads the saved game.
+ * each time; one the server refuses (the game changed in another window or on another device, or an action it can't
+ * apply) drops the rest, and the page reloads the saved game.
  */
 
 export type SaveOp =
