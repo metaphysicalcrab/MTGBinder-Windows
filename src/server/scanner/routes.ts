@@ -74,7 +74,11 @@ export function scanRoutes(deps: { db: DB; scanner: ScanService }): Hono {
     bodyLimit({
       maxSize: MAX_SCAN_BYTES,
       onError: () => {
-        throw new ApiError(413, 'too_large', `A capture can be at most ${MAX_SCAN_BYTES / 1024 / 1024} MB`)
+        throw new ApiError(
+          413,
+          'too_large',
+          `A capture can be at most ${MAX_SCAN_BYTES / 1024 / 1024} MB; from a phone, take the photo again (Binder shrinks each photo before sending it)`,
+        )
       },
     }),
     async (c) => {

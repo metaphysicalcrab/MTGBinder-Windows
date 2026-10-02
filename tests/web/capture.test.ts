@@ -9,7 +9,7 @@ import {
   frameChange,
   frameDifference,
   guideRect,
-  MAC_CAMERA_RANK,
+  BUILT_IN_CAMERA_RANK,
   preferredCamera,
   SAMPLE_MS,
   spaceCaptures,
@@ -167,8 +167,44 @@ describe('choosing a camera', () => {
     expect(preferredCamera([camera('OBS Virtual Camera'), deskView], null)?.label).toBe('OBS Virtual Camera')
     expect(preferredCamera([], null)).toBeNull()
     for (const label of ['MacBook Pro Camera', 'FaceTime HD Camera (Built-in)', 'Studio Display Camera']) {
-      expect([label, cameraRank(label)]).toEqual([label, MAC_CAMERA_RANK])
+      expect([label, cameraRank(label)]).toEqual([label, BUILT_IN_CAMERA_RANK])
     }
+  })
+
+  it('prefers a webcam or document camera over a Windows laptop\'s own, which faces the owner', () => {
+    const laptop = camera('Integrated Webcam')
+    const usb = camera('Logitech BRIO')
+    const docCam = camera('IPEVO V4K')
+    expect(preferredCamera([laptop, usb], null)).toBe(usb)
+    expect(preferredCamera([laptop, usb, docCam], null)).toBe(docCam)
+    expect(preferredCamera([camera('OBS Virtual Camera'), laptop], null)).toBe(laptop)
+    for (const label of ['Integrated Camera', 'Integrated Webcam', 'HD User Facing', 'HP TrueVision HD Camera', 'Microsoft Camera Front']) {
+      expect([label, cameraRank(label)]).toEqual([label, BUILT_IN_CAMERA_RANK])
+    }
+    // A Surface's back camera, held over the mat, is the one to scan with.
+    expect(preferredCamera([camera('Microsoft Camera Front'), camera('Microsoft Camera Rear')], null)?.label).toBe('Microsoft Camera Rear')
+  })
+
+  it("knows the names laptop makers give their own cameras, without taking a USB webcam's for one", () => {
+    // An ASUS's and an Acer's own cameras, listed first as Windows does, beside a Logitech webcam over the mat.
+    const c920 = camera('HD Pro Webcam C920 (046d:082d)')
+    expect(preferredCamera([camera('USB2.0 HD UVC WebCam'), c920], null)).toBe(c920)
+    expect(preferredCamera([camera('HD WebCam (04f2:b5d7)'), c920], null)).toBe(c920)
+    for (const label of ['USB2.0 HD UVC WebCam', 'USB2.0 VGA UVC WebCam (13d3:5165)', 'HD WebCam', 'HD WebCam (04f2:b5d7)', 'HP HD Camera', 'Chicony USB2.0 Camera']) {
+      expect([label, cameraRank(label)]).toEqual([label, BUILT_IN_CAMERA_RANK])
+    }
+    for (const label of ['HD Webcam C270', 'HD Webcam C615 (046d:082c)', 'HD Pro Webcam C920', 'Logitech BRIO', 'HP 320 FHD Webcam']) {
+      expect([label, cameraRank(label)]).toEqual([label, 1])
+    }
+  })
+
+  it("prefers a phone's back camera to its front one, whichever is listed first", () => {
+    const front = camera('camera2 1, facing front')
+    const back = camera('camera2 0, facing back')
+    expect(preferredCamera([front, back], null)).toBe(back)
+    expect(preferredCamera([camera('Front Camera'), camera('Back Camera')], null)?.label).toBe('Back Camera')
+    expect(cameraRank(front.label)).toBe(BUILT_IN_CAMERA_RANK)
+    expect(cameraRank(back.label)).toBe(0)
   })
 
   it('keeps the camera chosen before while it is there', () => {

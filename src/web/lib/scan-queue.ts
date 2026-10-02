@@ -104,6 +104,30 @@ export function sentAllToast(scans: number, to: { deckName: string; board: ScanB
   return `Sent ${plural(scans, 'scan')} to ${to.deckName} · ${BOARD_LABEL[to.board]}.`
 }
 
+/** The queue's counts (spec §5.1.3): ready to add (the rows Add counts), to check, and still being read. */
+export function queueCounts(items: ReadonlyArray<Pick<ScanItem, 'status'>>): { ready: number; toCheck: number; reading: number } {
+  let ready = 0
+  let toCheck = 0
+  let reading = 0
+  for (const item of items) {
+    if (item.status === 'confident') ready++
+    else if (item.status === 'review') toCheck++
+    else if (item.status === 'queued' || item.status === 'identifying') reading++
+  }
+  return { ready, toCheck, reading }
+}
+
+/**
+ * What the empty queue says to do, for how this page captures: the live camera (`live`) or photos from the camera app,
+ * and by a finger (`touch`: tap) or by keys and a mouse (Space, press).
+ */
+export function emptyQueueText(live: boolean, touch: boolean): string {
+  if (!live) return `Captured cards appear here. ${touch ? 'Tap' : 'Press'} Take a photo of the card, then fit the guide to it.`
+  return touch
+    ? 'Captured cards appear here. Place a card in the guide and tap Capture, or, with the phone mounted over the mat, switch to Auto to capture each card as you set it down.'
+    : 'Captured cards appear here. Place a card in the guide and press Capture or Space, or switch to Auto to capture each card as you set it down.'
+}
+
 /** The queue's note on auto captures with no text skipped in the last minute, or null for none. */
 export function skippedNote(skipped: number): string | null {
   if (skipped === 0) return null
