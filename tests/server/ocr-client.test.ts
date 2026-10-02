@@ -141,6 +141,18 @@ describe('createOcrClient', () => {
     await expect(client.recognize('noise')).rejects.toThrow('OCR took longer than 2 s: WARNING: this is not JSON')
   }, 10_000)
 
+  // native/ocr.ps1 under device policy (Constrained Language mode) answers why with the id "", then exits.
+  it('says why a helper that answers and exits stopped, to the image sent to it as it exits too', async () => {
+    client = createOcrClient({ command: [...FAKE, '--blocked'], timeoutMs: 2000 })
+    const why = "This PC's device policy keeps Binder from using Windows OCR"
+    await Promise.all(['one', 'two', 'three'].map((name) => expect(client!.recognize(name)).rejects.toThrow(why)))
+  }, 10_000)
+
+  it("reads a helper's last line when its exit is reported first", async () => {
+    client = createOcrClient({ command: [...FAKE, '--blocked=late'], timeoutMs: 2000 })
+    await expect(client.recognize('one')).rejects.toThrow(/^This PC's device policy keeps Binder from using Windows OCR$/)
+  }, 10_000)
+
   it("gives a helper's first image longer, for the helper's start, and the images after it the usual time", async () => {
     client = createOcrClient({ command: [...FAKE, '--start-delay=1500'], timeoutMs: 1000, startupTimeoutMs: 5000 })
     expect(await text(client, 'one')).toMatch(/:one$/)

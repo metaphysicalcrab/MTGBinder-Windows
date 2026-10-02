@@ -13,7 +13,7 @@
 # page (it reads a script without a byte order mark in the ANSI one).
 #
 # -Check answers one line about which languages Windows OCR reads on this PC, for `pnpm run setup`. -SelfTest checks the
-# parts that don't need Windows (splitting lines, boxes, JSON), in any PowerShell.
+# parts that don't need Windows (splitting lines, boxes, JSON, waiting on an operation), in any PowerShell.
 param(
   [switch]$Check,
   [switch]$SelfTest
@@ -31,9 +31,11 @@ $GapFactor = 1.5
 # 15 px tall, and a collector line is 1.5% of a card's height (14 px on a 936 px image).
 $TargetLongSide = 2400
 $MaxUpscale = 2.5
-# How long the WinRT calls for one image may take in all: under the server's 10 s, so a slow image is answered with an
-# error rather than the helper being stopped.
+# How long the WinRT calls for one image may take in all, and then how long one cancelled for passing that is given to
+# stop: together under the server's 10 s, so a slow image is answered with an error rather than the helper being
+# stopped.
 $WaitMs = 8000
+$CancelWaitMs = 500
 
 $AsTask = $null
 $Engine = $null
@@ -175,11 +177,18 @@ function Initialize-WindowsRuntime {
   } | Select-Object -First 1
 }
 
-# Waits for a WinRT operation's result, until the image's deadline.
+# Waits for a WinRT operation's result, until the image's deadline. One still running then is cancelled, rather than
+# left decoding or reading while the next image starts, and given a moment to stop before Read-Card lets go of the
+# stream and bitmap it reads.
 function Wait-Operation($Operation, [Type]$ResultType) {
   $task = $AsTask.MakeGenericMethod($ResultType).Invoke($null, @($Operation))
   $left = [Math]::Max(1, [int]($Deadline - [DateTime]::UtcNow).TotalMilliseconds)
-  if (-not $task.Wait($left)) { throw ('Windows OCR took longer than ' + ($WaitMs / 1000) + ' s') }
+  if (-not $task.Wait($left)) {
+    try { $Operation.Cancel() } catch { }
+    # A cancelled task throws when waited for.
+    try { [void]$task.Wait($CancelWaitMs) } catch { }
+    throw ('Windows OCR took longer than ' + ($WaitMs / 1000) + ' s')
+  }
   $task.Result
 }
 
@@ -365,6 +374,27 @@ function Invoke-SelfTest {
   & $expect 'reads a request' ($request.Id + ' ' + $request.Path) ('3 C:\Users\Zo' + [char]0xEB + '\12.jpg')
   $notRequests = @((Read-Request 'nonsense'), (Read-Request '5'), (Read-Request '{"id":3,"path":"x"}'))
   & $expect "doesn't take what isn't a request" ($notRequests -join '|') '||'
+
+  # Wait-Operation, with stand-ins for AsTask and a WinRT operation (whose Cancel cancels its task, as WinRT's does).
+  $script:AsTask = [pscustomobject]@{}
+  $script:AsTask | Add-Member ScriptMethod MakeGenericMethod { param($Type) $this }
+  $script:AsTask | Add-Member ScriptMethod Invoke { param($Target, $Arguments) $Arguments[0].Source.Task }
+  $newOperation = {
+    $standIn = [pscustomobject]@{ Source = New-Object 'Threading.Tasks.TaskCompletionSource[object]'; Cancelled = $false }
+    $standIn | Add-Member ScriptMethod Cancel { $this.Cancelled = $true; [void]$this.Source.TrySetCanceled() }
+    $standIn
+  }
+  $quick = & $newOperation
+  $quick.Source.SetResult('read')
+  $script:Deadline = [DateTime]::UtcNow.AddMilliseconds($WaitMs)
+  & $expect 'waits for an operation' (Wait-Operation $quick ([object])) 'read'
+  $slow = & $newOperation
+  $script:Deadline = [DateTime]::UtcNow.AddMilliseconds(50)
+  try { $outcome = Wait-Operation $slow ([object]) } catch { $outcome = Get-Reason $_ }
+  $outcome = $outcome + ' (cancelled: ' + $slow.Cancelled + ')'
+  & $expect 'cancels an operation past the deadline' $outcome 'Windows OCR took longer than 8 s (cancelled: True)'
+  $script:AsTask = $null
+
   # The answer itself, for the test that runs this to read as Binder does.
   Send-Line $answer
 

@@ -169,6 +169,9 @@ export function createOcrClient({
       if (message.id !== reading.id && message.id !== '') return
       helper.answered = true
       if (typeof message.error === 'string') {
+        // A helper that couldn't read a request may stop next (ocr.ps1 under device policy says why, then exits), so
+        // what it said is kept for the image sent to it in the meantime.
+        if (message.id === '') keep(`${message.error}\n`)
         finish({ error: new Error(message.error) })
         return
       }
@@ -185,8 +188,14 @@ export function createOcrClient({
       if (reading?.helper === helper) finish({ error: new Error(`The OCR helper stopped (${reason})${said(helper)}`) })
     }
     proc.on('error', (err) => stopped(err.message))
-    proc.on('exit', (code, signal) => stopped(signal ?? `exit code ${code}`))
-    proc.stdin.on('error', () => {}) // a write to a helper that just died; 'exit' reports it
+    // Images that come after its exit go to a new helper, but the one it was reading fails only once its output has
+    // closed: Node can report the exit before the last lines it wrote are read, and one may be its answer, or why it
+    // stopped.
+    proc.on('exit', () => {
+      if (child === helper) child = null
+    })
+    proc.on('close', (code, signal) => stopped(signal ?? `exit code ${code}`))
+    proc.stdin.on('error', () => {}) // a write to a helper that just died; 'close' reports it
     return helper
   }
 
@@ -208,7 +217,7 @@ export function createOcrClient({
     close() {
       const stopped = new Error('The OCR helper was stopped')
       for (const job of waiting.splice(0)) job.reject(stopped)
-      child?.proc.kill() // its exit fails the image it was reading
+      child?.proc.kill() // its end fails the image it was reading
       child = null
     },
   }

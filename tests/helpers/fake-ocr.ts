@@ -9,7 +9,10 @@
 //
 // Arguments: --ready says {"ready":true} when it starts; --start-delay=<ms> reads nothing for that long, as Windows
 // PowerShell takes seconds to start; -Check answers like native/ocr.ps1 -Check (after a BOM and a line that isn't
-// JSON), with English unless --no-english.
+// JSON), with English unless --no-english; --blocked answers like native/ocr.ps1 under device policy, reading no
+// request: why, with the id "", then exit code 1 a moment later. --blocked=late exits first and has a process it leaves
+// behind write that line, as Node can report a helper's exit before the last lines it wrote are read.
+import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 
 const args = process.argv.slice(2)
@@ -68,9 +71,22 @@ if (args.includes('-Check')) {
   )
   process.exit(0)
 }
-if (args.includes('--ready')) send({ ready: true })
-const startDelay = Number(args.find((a) => a.startsWith('--start-delay='))?.split('=')[1] ?? 0)
-let reading = new Promise<void>((resolve) => setTimeout(resolve, startDelay))
-createInterface({ input: process.stdin }).on('line', (input) => {
-  reading = reading.then(() => handle(input))
-})
+const blocked = args.find((a) => a.startsWith('--blocked'))
+if (blocked) {
+  const why = `${JSON.stringify({ id: '', error: "This PC's device policy keeps Binder from using Windows OCR" })}\n`
+  if (blocked === '--blocked=late') {
+    const write = `setTimeout(() => process.stdout.write(${JSON.stringify(why)}), 300)`
+    // Detached, or Windows would end it with this process.
+    spawn(process.execPath, ['-e', write], { stdio: ['ignore', 'inherit', 'inherit'], detached: true })
+    process.exit(1)
+  }
+  process.stdout.write(why)
+  setTimeout(() => process.exit(1), 200)
+} else {
+  if (args.includes('--ready')) send({ ready: true })
+  const startDelay = Number(args.find((a) => a.startsWith('--start-delay='))?.split('=')[1] ?? 0)
+  let reading = new Promise<void>((resolve) => setTimeout(resolve, startDelay))
+  createInterface({ input: process.stdin }).on('line', (input) => {
+    reading = reading.then(() => handle(input))
+  })
+}
