@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 import { onOverlayEntry, useOnOverlayEntry } from '../lib/back-to-close.ts'
 import { useCardDrawer } from '../lib/card-drawer.tsx'
+import { usePageCovered } from '../lib/cover.ts'
 import { createGoTo, GO_TO, shortcutAllowed } from '../lib/shortcuts.ts'
 import { useBulkRefresh } from '../lib/use-bulk-status.ts'
 import { CardDrawer } from './CardDrawer.tsx'
@@ -20,10 +21,11 @@ export function Layout() {
   /** Opens the shortcuts list: the header's ? button, and pages through OpenShortcutsContext. */
   const openShortcuts = useCallback(() => setHelpOpen(true), [])
   const closeShortcuts = useCallback(() => setHelpOpen(false), [])
-  // While the card drawer, the shortcuts or More's pages are open, the page behind can't be focused or clicked, so Tab
-  // stays there.
+  // While the card drawer, the shortcuts or More's pages are open, or a page's own overlay over the window (the Scan
+  // page's photo review, Settings' pairing dialog), the page behind can't be focused or clicked, so Tab stays there.
   const drawerOpen = useCardDrawer().cardId !== null
-  const covered = drawerOpen || helpOpen || moreOpen
+  const pageCovered = usePageCovered()
+  const covered = drawerOpen || helpOpen || moreOpen || pageCovered
   // The playtest's table fills the window below the header (spec §5.9.3).
   const table = useLocation().pathname === '/playtest'
   // Leaving the page with an overlay open (Library's import panel, say) replaces the overlay's history entry, so Back

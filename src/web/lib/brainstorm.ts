@@ -2,6 +2,7 @@ import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tansta
 import { useCallback, useEffect, useReducer, useRef } from 'react'
 import type { ApiErrorBody, ChatEvent, ChatItem, ThreadDetail, ThreadSummary } from '../../shared/types.ts'
 import { apiGet, apiSend, ApiRequestError } from './api.ts'
+import { apiSignal, reportApiError } from './client.ts'
 import { invalidateCollection } from './collection.ts'
 import { useToast } from './toast.tsx'
 
@@ -261,6 +262,8 @@ export function useAnswer(threadId: number) {
           ctrl.signal,
         )
       } catch (err) {
+        // A phone the PC forgot goes back to the pairing page, as from any other request (React Query's own go there).
+        if (apiSignal(err) === 'unpaired') return reportApiError(err)
         const cutWhileHidden = hidden && !(err instanceof ApiRequestError)
         if (!ctrl.signal.aborted && !cutWhileHidden) toast.error(err instanceof Error ? err.message : String(err))
       } finally {

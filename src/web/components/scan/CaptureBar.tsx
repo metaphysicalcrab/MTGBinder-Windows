@@ -1,13 +1,30 @@
-import type { ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 
 /**
  * The capture button's row, under the camera (spec §5.1.1). Below lg (a phone, a tablet) it's a bar that stays above the
  * bottom tabs while the camera is on screen, with the queue's summary (`summary`) beside the button, both in a thumb's
- * reach; from lg up, the plain row it has always been.
+ * reach; from lg up, the plain row it has always been. While it's there, the room it takes above the tabs (its height
+ * and the gap under it) is published as `--capture-bar`, for the toasts to stand above it (toast-offset in index.css)
+ * rather than over the button.
  */
 export function CaptureBar({ summary, children }: { summary?: ReactNode; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const bar = ref.current
+    if (!bar) return
+    const root = document.documentElement
+    const observer = new ResizeObserver(() => root.style.setProperty('--capture-bar', `calc(${bar.offsetHeight}px + 0.5rem)`))
+    observer.observe(bar)
+    return () => {
+      observer.disconnect()
+      root.style.removeProperty('--capture-bar')
+    }
+  }, [])
   return (
-    <div className="sticky bottom-[calc(var(--nav-height)+env(safe-area-inset-bottom)+0.5rem)] z-10 flex items-center gap-3 rounded-xl border border-stone-800 bg-stone-950/95 p-2 shadow-lg shadow-black/40 backdrop-blur lg:static lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none">
+    <div
+      ref={ref}
+      className="sticky bottom-[calc(var(--nav-height)+env(safe-area-inset-bottom)+0.5rem)] z-10 flex items-center gap-3 rounded-xl border border-stone-800 bg-stone-950/95 p-2 shadow-lg shadow-black/40 backdrop-blur lg:static lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none"
+    >
       {children}
       {summary}
     </div>

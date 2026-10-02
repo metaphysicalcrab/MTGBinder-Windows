@@ -11,6 +11,7 @@ import {
   useRenameThread,
   useThread,
 } from '../../lib/brainstorm.ts'
+import { useOnPhone } from '../../lib/client.ts'
 import { formatUsd } from '../../lib/format.ts'
 import { ChatItemView } from './ChatItemView.tsx'
 import { Composer } from './Composer.tsx'
@@ -26,6 +27,7 @@ const FOLLOW_SLACK = 120
 /** One conversation (spec §5.5): its header, the items, and the message box. */
 export function ChatView({ threadId, configured }: { threadId: number; configured: boolean }) {
   const answer = useAnswer(threadId)
+  const phone = useOnPhone()
   const { data: thread, error } = useThread(threadId, { answering: answer.running })
   const rename = useRenameThread(threadId)
   const navigate = useNavigate()
@@ -204,6 +206,10 @@ export function ChatView({ threadId, configured }: { threadId: number; configure
           disabled={busyElsewhere}
           placeholder={thread.deck ? `Ask about ${thread.deck.name}…` : 'Ask Claude…'}
         />
+      ) : phone ? (
+        <p className="rounded-lg border border-stone-800 bg-stone-900/60 p-3 text-sm text-stone-400">
+          Brainstorming needs an Anthropic API key: add one in Settings on the PC running Binder.
+        </p>
       ) : (
         <p className="rounded-lg border border-stone-800 bg-stone-900/60 p-3 text-sm text-stone-400">
           Brainstorming needs an Anthropic API key.{' '}

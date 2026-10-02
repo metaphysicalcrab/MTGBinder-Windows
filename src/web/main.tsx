@@ -1,14 +1,25 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { RouterProvider } from 'react-router'
+import { ClientGate } from './components/ClientGate.tsx'
 import './index.css'
 import { ApiRequestError } from './lib/api.ts'
 import { CardDrawerProvider } from './lib/card-drawer.tsx'
+import { apiSignal, reportApiError } from './lib/client.ts'
 import { ToastProvider } from './lib/toast.tsx'
 import { router } from './routes.tsx'
 
 const queryClient = new QueryClient({
+  // A phone the PC forgot goes back to the pairing page, whatever asked; something only the PC may change says so
+  // (ClientGate), unless the change says why it failed itself.
+  queryCache: new QueryCache({ onError: reportApiError }),
+  mutationCache: new MutationCache({
+    onError: (err, _variables, _context, mutation) => {
+      if (apiSignal(err) === 'pc_only' && mutation.options.onError) return
+      reportApiError(err)
+    },
+  }),
   defaultOptions: {
     queries: {
       staleTime: 30_000,
@@ -28,9 +39,11 @@ createRoot(root).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <CardDrawerProvider>
-          <RouterProvider router={router} />
-        </CardDrawerProvider>
+        <ClientGate onPaired={() => void router.navigate('/library', { replace: true })}>
+          <CardDrawerProvider>
+            <RouterProvider router={router} />
+          </CardDrawerProvider>
+        </ClientGate>
       </ToastProvider>
     </QueryClientProvider>
   </StrictMode>,

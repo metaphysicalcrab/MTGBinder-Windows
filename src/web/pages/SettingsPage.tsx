@@ -1,7 +1,11 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import type { Finish } from '../../shared/types.ts'
+import { PhoneAccessSettings } from '../components/settings/PhoneAccessSettings.tsx'
+import { ApiKeyOnThePc, ThisPhoneSettings } from '../components/settings/PhoneSettings.tsx'
+import { checkbox, section, sectionHead } from '../components/settings/styles.ts'
 import { apiPost } from '../lib/api.ts'
+import { useOnPhone } from '../lib/client.ts'
 import { formatDate } from '../lib/format.ts'
 import {
   librarySizeText,
@@ -17,8 +21,14 @@ import {
 } from '../lib/settings.ts'
 import { isBulkRunning, useBulkStatus } from '../lib/use-bulk-status.ts'
 
+/**
+ * Settings (spec §5.6). On a paired phone (spec §5.10), what a phone may change: card data, the scanner, and the
+ * deckbuilder, with whether Brainstorm has a key and This phone; the PC's own sections aren't shown, and what they'd
+ * ask for is never asked.
+ */
 export function SettingsPage() {
   const queryClient = useQueryClient()
+  const phone = useOnPhone()
   const { data: status, error } = useBulkStatus()
   const refresh = useMutation({
     mutationFn: () => apiPost<{ started: boolean }>('/api/bulk/refresh'),
@@ -84,18 +94,20 @@ export function SettingsPage() {
         )}
       </section>
       <ScannerSettings />
-      <ApiKeySettings />
+      {phone ? <ApiKeyOnThePc /> : <ApiKeySettings />}
       <DeckbuilderSettings />
-      <BackupSettings />
-      <LibraryFileSettings running={running} />
+      {phone ? (
+        <ThisPhoneSettings />
+      ) : (
+        <>
+          <BackupSettings />
+          <LibraryFileSettings running={running} />
+          <PhoneAccessSettings />
+        </>
+      )}
     </div>
   )
 }
-
-const section = 'rounded-xl border border-stone-800 bg-stone-900/40 p-4 sm:p-6'
-/** A section's title and description, with its button beside them, or under them on a phone. */
-const sectionHead = 'flex flex-col items-start gap-3 sm:flex-row sm:justify-between sm:gap-4'
-const checkbox = 'accent-amber-500 shrink-0 pointer-coarse:size-5'
 
 /** Spec §5.6 "Backups": when the last backup was made, Back up now, and the folder they're kept in. */
 function BackupSettings() {
