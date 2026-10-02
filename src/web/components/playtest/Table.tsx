@@ -1,9 +1,10 @@
-import { useLayoutEffect, useRef, useState, type RefObject } from 'react'
+import { useLayoutEffect, useRef, useState, type MouseEvent, type RefObject } from 'react'
 import { attachmentsOf, commanderTax, looseCards, losingReasons, visibleTo } from '../../../shared/playtest/status.ts'
 import type { CardState, SeatIndex } from '../../../shared/playtest/types.ts'
+import { undoKeyLabel } from '../../lib/platform.ts'
 import { CARD_RATIO, commandStep, handHeight, toScreen, type Box } from '../../lib/playtest-board.ts'
 import type { SaveStatus } from '../../lib/playtest-save.ts'
-import { useBoard } from './board-context.ts'
+import { hoverOn, useBoard } from './board-context.ts'
 import { CardBack, CardView } from './CardView.tsx'
 
 /** The table's parts (spec §5.9.3): each half's battlefield and side block, the hands, and the turn bar. */
@@ -43,7 +44,7 @@ export function Battlefield({ seat, fieldRef }: { seat: SeatIndex; fieldRef?: Re
       onContextMenu={(e) => {
         if (e.target === e.currentTarget) board.openFieldMenu(e, seat)
       }}
-      className={`relative isolate min-h-0 flex-1 overflow-hidden rounded-lg border border-stone-800 bg-stone-900/40 ${board.attaching ? 'cursor-crosshair' : ''}`}
+      className={`relative isolate min-h-0 flex-1 touch-none overflow-hidden rounded-lg border border-stone-800 bg-stone-900/40 ${board.attaching ? 'cursor-crosshair' : ''}`}
     >
       {size &&
         looseCards(board.game, seat).map((card, i) => <FieldCard key={card.id} card={card} layer={i} size={size} flipped={flipped} />)}
@@ -77,9 +78,8 @@ function Placed({ card, left, top, z }: { card: CardState; left: number; top: nu
       style={{ left, top, zIndex: z, transform: card.tapped ? 'rotate(90deg)' : undefined }}
       onPointerDown={(e) => board.beginCardDrag(e, card.id, 'battlefield')}
       onContextMenu={(e) => board.openCardMenu(e, card.id)}
-      onPointerEnter={() => board.setHovered(card.id)}
-      onPointerLeave={() => board.setHovered(null)}
-      className="absolute cursor-grab transition-transform duration-150"
+      {...hoverOn(board, card.id)}
+      className="absolute cursor-grab touch-none transition-transform duration-150"
     >
       <CardView
         data={board.game.data[card.id]!}
@@ -130,9 +130,8 @@ export function HandStrip({ seat }: { seat: SeatIndex }) {
           onPointerDown={(e) => board.beginCardDrag(e, id, 'hand')}
           onDoubleClick={() => board.playCard(id)}
           onContextMenu={(e) => board.openCardMenu(e, id)}
-          onPointerEnter={() => board.setHovered(id)}
-          onPointerLeave={() => board.setHovered(null)}
-          className="cursor-grab pt-2 transition-transform hover:-translate-y-2"
+          {...hoverOn(board, id)}
+          className="cursor-grab touch-none pt-2 transition-transform hover:-translate-y-2"
         >
           <CardView data={board.game.data[id]!} height={height} />
         </div>
@@ -141,8 +140,12 @@ export function HandStrip({ seat }: { seat: SeatIndex }) {
   )
 }
 
+/** A tally's − and +: a finger's are 36 px. */
+const TALLY_STEP = 'size-6 rounded border border-stone-700 text-stone-300 hover:bg-stone-800 pointer-coarse:size-9'
+
 /** A number with − and + (each a step of 1); clicking the number lets me type a new one. */
 function Tally({ label, value, big = false, onChange }: { label: string; value: number; big?: boolean; onChange: (delta: number) => void }) {
+  const { coarse } = useBoard()
   const [editing, setEditing] = useState<string | null>(null)
   const commit = () => {
     const next = Number(editing)
@@ -155,14 +158,14 @@ function Tally({ label, value, big = false, onChange }: { label: string; value: 
         {label}
       </span>
       <div className="flex shrink-0 items-center gap-1">
-        <button aria-label={`${label}: one less`} onClick={() => onChange(-1)} className="size-6 rounded border border-stone-700 text-stone-300 hover:bg-stone-800">
+        <button aria-label={`${label}: one less`} onClick={() => onChange(-1)} className={TALLY_STEP}>
           −
         </button>
         {editing === null ? (
           <button
-            aria-label={`${label}: ${value}. Click to type a number`}
+            aria-label={`${label}: ${value}. ${coarse ? 'Tap' : 'Click'} to type a number`}
             onClick={() => setEditing(String(value))}
-            className={`min-w-9 rounded text-center tabular-nums hover:bg-stone-800 ${big ? 'text-2xl leading-7 font-bold text-stone-50' : 'text-sm text-stone-100'}`}
+            className={`min-w-9 rounded text-center tabular-nums hover:bg-stone-800 pointer-coarse:min-h-9 ${big ? 'text-2xl leading-7 font-bold text-stone-50' : 'text-sm text-stone-100'}`}
           >
             {value}
           </button>
@@ -171,6 +174,7 @@ function Tally({ label, value, big = false, onChange }: { label: string; value: 
             autoFocus
             aria-label={label}
             inputMode="numeric"
+            enterKeyHint="done"
             value={editing}
             onChange={(e) => setEditing(e.target.value)}
             onBlur={commit}
@@ -181,7 +185,7 @@ function Tally({ label, value, big = false, onChange }: { label: string; value: 
             className="w-12 rounded border border-stone-600 bg-stone-950 px-1 text-center text-stone-50"
           />
         )}
-        <button aria-label={`${label}: one more`} onClick={() => onChange(1)} className="size-6 rounded border border-stone-700 text-stone-300 hover:bg-stone-800">
+        <button aria-label={`${label}: one more`} onClick={() => onChange(1)} className={TALLY_STEP}>
           +
         </button>
       </div>
@@ -235,21 +239,37 @@ export function SideBlock({ seat }: { seat: SeatIndex }) {
   )
 }
 
+/**
+ * A seat's library: a click draws, and a right-click (a finger: holding it, or its ⋯) opens the rest (spec §5.9.4).
+ */
 function Library({ seat, height }: { seat: SeatIndex; height: number }) {
   const board = useBoard()
   const count = board.game.seats[seat]!.library.length
   return (
-    <button
-      data-drop={`library-${seat}`}
-      aria-label={`Library, ${count === 1 ? '1 card' : `${count} cards`}. Click to draw; right-click for more`}
-      title="Click to draw a card; right-click for more"
-      onClick={() => board.play({ type: 'draw', seat, count: 1 })}
-      onContextMenu={(e) => board.openLibraryMenu(e, seat)}
-      className="flex shrink-0 flex-col items-center gap-0.5 text-[11px] whitespace-nowrap text-stone-400"
-    >
-      {count > 0 ? <CardBack height={height} /> : <EmptyPile height={height} />}
-      <span>Library {count}</span>
-    </button>
+    <div className="relative flex shrink-0">
+      <button
+        data-drop={`library-${seat}`}
+        aria-label={`Library, ${count === 1 ? '1 card' : `${count} cards`}. ${board.coarse ? 'Tap to draw; press and hold for more' : 'Click to draw; right-click for more'}`}
+        title={board.coarse ? 'Tap to draw a card; press and hold for more' : 'Click to draw a card; right-click for more'}
+        onClick={() => board.play({ type: 'draw', seat, count: 1 })}
+        onPointerDown={(e) => board.beginHold(e, { library: seat })}
+        onContextMenu={(e) => board.openLibraryMenu(e, seat)}
+        className="flex shrink-0 flex-col items-center gap-0.5 text-[11px] whitespace-nowrap text-stone-400"
+      >
+        {count > 0 ? <CardBack height={height} /> : <EmptyPile height={height} />}
+        <span>Library {count}</span>
+      </button>
+      {/* The menu in reach of a finger that doesn't know to hold: a small button, its target bigger than it looks. */}
+      {board.coarse && (
+        <button
+          aria-label="More: draw several, look, search, mill, reveal, shuffle"
+          onClick={(e) => board.openLibraryMenu(e, seat)}
+          className="absolute -top-2 -right-2 flex size-6 items-center justify-center rounded-full border border-stone-600 bg-stone-800 text-sm leading-none text-stone-100 shadow before:absolute before:-inset-2"
+        >
+          ⋯
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -260,10 +280,9 @@ function PublicPile({ seat, zone, label, height }: { seat: SeatIndex; zone: 'gra
   return (
     <button
       data-drop={`${zone}-${seat}`}
-      aria-label={`${zone === 'graveyard' ? 'Graveyard' : 'Exile'}, ${cards.length === 1 ? '1 card' : `${cards.length} cards`}. Click to see them`}
+      aria-label={`${zone === 'graveyard' ? 'Graveyard' : 'Exile'}, ${cards.length === 1 ? '1 card' : `${cards.length} cards`}. ${board.coarse ? 'Tap' : 'Click'} to see them`}
       onClick={() => board.openPile(seat, zone)}
-      onPointerEnter={() => top && board.setHovered(top)}
-      onPointerLeave={() => board.setHovered(null)}
+      {...hoverOn(board, top)}
       className="flex shrink-0 flex-col items-center gap-0.5 text-[11px] whitespace-nowrap text-stone-400"
     >
       {top ? <CardView data={board.game.data[top]!} height={height} /> : <EmptyPile height={height} />}
@@ -311,9 +330,8 @@ function CommandZone({ seat, height }: { seat: SeatIndex; height: number }) {
             onPointerDown={(e) => board.beginCardDrag(e, id, 'command')}
             onDoubleClick={() => board.playCard(id)}
             onContextMenu={(e) => board.openCardMenu(e, id)}
-            onPointerEnter={() => board.setHovered(id)}
-            onPointerLeave={() => board.setHovered(null)}
-            className="cursor-grab"
+            {...hoverOn(board, id)}
+            className="cursor-grab touch-none"
           >
             <CardView data={board.game.data[id]!} height={height} />
           </div>
@@ -327,24 +345,36 @@ function CommandZone({ seat, height }: { seat: SeatIndex; height: number }) {
   )
 }
 
-/** The bar between the halves: the turn, the stack when something's on it, and the game's buttons. */
+/**
+ * The bar between the halves: the turn, the stack when something's on it, and the game's buttons. Below lg, Log, Switch
+ * side and End game wait behind a ⋯ (onMore). With a finger, Select makes a tap select cards (a finger has no Shift),
+ * and Clear clears them (it has no Escape).
+ */
 export function TurnBar({
   saveStatus,
   canUndo,
   canSwitch,
+  selecting,
+  onSelecting,
+  onClear,
   onUndo,
   onLog,
   onSwitch,
   onEnd,
+  onMore,
   onNextTurn,
 }: {
   saveStatus: SaveStatus
   canUndo: boolean
   canSwitch: boolean
+  selecting: boolean
+  onSelecting: (on: boolean) => void
+  onClear: () => void
   onUndo: () => void
   onLog: () => void
   onSwitch: () => void
   onEnd: () => void
+  onMore: (e: MouseEvent) => void
   onNextTurn: () => void
 }) {
   const board = useBoard()
@@ -354,24 +384,45 @@ export function TurnBar({
       data-drop="stack"
       className="flex shrink-0 items-center gap-3 rounded-lg border border-stone-700 bg-stone-900 px-3 py-1.5 text-sm"
     >
-      <div className="shrink-0">
-        <span className="font-semibold text-amber-400">Turn {game.turn}</span>
-        <span className="text-stone-300"> · {game.seats[game.active]!.name}</span>
+      {/* The deck's name gives way first when the bar is short of room. */}
+      <div className="flex min-w-0 items-baseline">
+        <span className="shrink-0 font-semibold text-amber-400">Turn {game.turn}</span>
+        <span className="truncate text-stone-300">&nbsp;· {game.seats[game.active]!.name}</span>
       </div>
       <Stack />
       <span className="shrink-0 text-xs text-stone-500" aria-live="polite">
         {saveStatus === 'saving' ? 'Saving…' : ''}
       </span>
       <div className="flex shrink-0 gap-1.5">
-        <BarButton onClick={onUndo} disabled={!canUndo} title="Undo (⌘Z)">
+        {board.coarse && (
+          <>
+            <BarButton
+              pressed={selecting}
+              onClick={() => onSelecting(!selecting)}
+              title={selecting ? 'Tapping a card selects it, or takes it out of the selection' : 'Select cards by tapping them'}
+            >
+              Select
+            </BarButton>
+            {board.selection.size > 0 && <BarButton onClick={onClear}>{`Clear ${board.selection.size}`}</BarButton>}
+          </>
+        )}
+        <BarButton onClick={onUndo} disabled={!canUndo} title={`Undo (${undoKeyLabel})`}>
           Undo
         </BarButton>
-        <BarButton onClick={onLog}>Log</BarButton>
-        <BarButton onClick={onSwitch} disabled={!canSwitch} title="Switch side (Tab)">
-          Switch side
+        <div className="hidden gap-1.5 lg:flex">
+          <BarButton onClick={onLog}>Log</BarButton>
+          <BarButton onClick={onSwitch} disabled={!canSwitch} title="Switch side (Tab)">
+            Switch side
+          </BarButton>
+          <BarButton onClick={onEnd}>End game</BarButton>
+        </div>
+        <BarButton onClick={onMore} label="More: Log, Switch side, End game" className="lg:hidden">
+          ⋯
         </BarButton>
-        <BarButton onClick={onEnd}>End game</BarButton>
-        <button onClick={onNextTurn} className="rounded-md border border-amber-600 bg-amber-700 px-3 py-1 font-medium text-white hover:bg-amber-600">
+        <button
+          onClick={onNextTurn}
+          className="rounded-md border border-amber-600 bg-amber-700 px-3 py-1 font-medium text-white hover:bg-amber-600 pointer-coarse:py-2"
+        >
           Next turn
         </button>
       </div>
@@ -379,15 +430,42 @@ export function TurnBar({
   )
 }
 
-function BarButton({ children, ...props }: { children: string; onClick: () => void; disabled?: boolean; title?: string }) {
+function BarButton({
+  children,
+  onClick,
+  disabled,
+  title,
+  label,
+  pressed,
+  className = '',
+}: {
+  children: string
+  onClick: (e: MouseEvent) => void
+  disabled?: boolean
+  title?: string
+  label?: string
+  /** A toggle's state (Select). */
+  pressed?: boolean
+  className?: string
+}) {
   return (
-    <button {...props} className="rounded-md border border-stone-700 bg-stone-800 px-2.5 py-1 text-stone-200 hover:bg-stone-700 disabled:opacity-40 disabled:hover:bg-stone-800">
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-label={label}
+      aria-pressed={pressed}
+      className={`rounded-md border border-stone-700 bg-stone-800 px-2.5 py-1 text-stone-200 hover:bg-stone-700 disabled:opacity-40 disabled:hover:bg-stone-800 aria-pressed:border-amber-500 aria-pressed:bg-amber-900/60 aria-pressed:text-amber-100 pointer-coarse:py-2 ${className}`}
+    >
       {children}
     </button>
   )
 }
 
-/** What's on the stack, oldest on the left: spells as cards, abilities as tags naming their card. */
+/**
+ * What's on the stack, oldest on the left: spells as cards, abilities as tags naming their card. A double-click resolves
+ * an item; a finger's tap opens its menu, Resolve first.
+ */
 function Stack() {
   const board = useBoard()
   const { game } = board
@@ -399,7 +477,7 @@ function Stack() {
         <li
           key={item.id}
           data-card={item.kind === 'spell' ? item.id : undefined}
-          title="Double-click to resolve; right-click for more"
+          title={board.coarse ? 'Tap for Resolve and more' : 'Double-click to resolve; right-click for more'}
           onDoubleClick={() => {
             // Resolving takes this item from under the pointer. An ability's hover is its source, which stays where it
             // is, so the Board can't tell the hover has ended: end it here.
@@ -407,10 +485,9 @@ function Stack() {
             board.play({ type: 'resolve', item: item.id })
           }}
           onContextMenu={(e) => board.openStackMenu(e, item.id)}
-          onPointerDown={item.kind === 'spell' ? (e) => board.beginCardDrag(e, item.id, 'stack') : undefined}
-          onPointerEnter={() => board.setHovered(item.kind === 'spell' ? item.id : item.source)}
-          onPointerLeave={() => board.setHovered(null)}
-          className={`shrink-0 ${i === game.stack.length - 1 ? 'ring-2 ring-amber-500/70' : ''} rounded`}
+          onPointerDown={(e) => (item.kind === 'spell' ? board.beginCardDrag(e, item.id, 'stack') : board.beginHold(e, { item: item.id }))}
+          {...hoverOn(board, item.kind === 'spell' ? item.id : item.source)}
+          className={`shrink-0 touch-none ${i === game.stack.length - 1 ? 'ring-2 ring-amber-500/70' : ''} rounded`}
         >
           {item.kind === 'spell' ? (
             <CardView data={game.data[item.id]!} height={52} />

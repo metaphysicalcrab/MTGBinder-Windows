@@ -150,6 +150,63 @@ export function counterTag(name: string, value: number): string {
   return `${name} ${value}`
 }
 
+/** Where a drag started, which decides what a click without a drag does. */
+export type DragSource = 'battlefield' | 'hand' | 'command' | 'stack' | 'pile'
+
+/**
+ * How long a finger (or a pen) held still on the table opens what a right-click would (M13): about as long as Android's
+ * own long-press.
+ */
+export const LONG_PRESS_MS = 450
+
+/** A finger or a pen, not a mouse: it drags after a longer move, holds for a menu, and taps for one off the battlefield. */
+export function isTouch(pointerType: string): boolean {
+  return pointerType === 'touch' || pointerType === 'pen'
+}
+
+/**
+ * How far a press moves before it's a drag rather than a click: 5 px with a mouse, 10 with a finger or a pen, which
+ * wobble as they come down and lift.
+ */
+export function dragStartPx(touch: boolean): number {
+  return touch ? 10 : 5
+}
+
+/** A press on the table, from the pointer going down until it comes up (or the browser takes it: pointercancel). */
+export interface Press {
+  start: { x: number; y: number }
+  touch: boolean
+  /** It has gone far enough to be a drag (dragStartPx); once a drag, it stays one. */
+  moved: boolean
+}
+
+/** Whether a press is a drag with the pointer at `at`. */
+export function movedFar(press: Press, at: { x: number; y: number }): boolean {
+  return press.moved || Math.hypot(at.x - press.start.x, at.y - press.start.y) > dragStartPx(press.touch)
+}
+
+/** Whether a press held for LONG_PRESS_MS opens its menu: a finger or a pen that hasn't moved. A mouse right-clicks. */
+export function holdOpensMenu(press: Press): boolean {
+  return press.touch && !press.moved
+}
+
+/**
+ * What a press on a card that comes up without moving does (spec §5.9.4, M13). On the battlefield: attaches the cards
+ * waiting for a host, adds the card to the selection or takes it out (Shift, or Select's mode for a finger), or taps it.
+ * Elsewhere a finger opens the card's menu, Play (or Resolve) first; a mouse plays and resolves with a double-click.
+ */
+export function tapAction(
+  source: DragSource,
+  press: { touch: boolean; shift: boolean },
+  board: { attaching: boolean; selecting: boolean },
+): 'attach' | 'select' | 'tap' | 'menu' | 'none' {
+  if (source === 'battlefield') return board.attaching ? 'attach' : press.shift || board.selecting ? 'select' : 'tap'
+  return press.touch ? 'menu' : 'none'
+}
+
+/** The narrowest window the table fits (M13): a tablet, or a phone on its side. Narrower, the page says so first. */
+export const TABLE_MIN_WIDTH = 768
+
 export type BoardKey = 'tap' | 'flip' | 'plus' | 'minus' | 'draw' | 'switch' | 'undo' | 'clear'
 
 /**

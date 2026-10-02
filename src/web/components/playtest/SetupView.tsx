@@ -23,7 +23,7 @@ function Choice<T extends string | number>({ label, value, options, onChange }: 
           aria-checked={v === value}
           disabled={disabled}
           onClick={() => onChange(v)}
-          className={`border-r border-stone-700 px-3 py-1 text-sm last:border-r-0 disabled:opacity-40 ${v === value ? 'bg-amber-900/60 text-amber-100' : 'text-stone-300 hover:bg-stone-800'}`}
+          className={`border-r border-stone-700 px-3 py-1 text-sm last:border-r-0 disabled:opacity-40 pointer-coarse:py-2 ${v === value ? 'bg-amber-900/60 text-amber-100' : 'text-stone-300 hover:bg-stone-800'}`}
         >
           {text}
         </button>
