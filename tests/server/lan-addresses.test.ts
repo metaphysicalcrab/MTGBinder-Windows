@@ -1,5 +1,5 @@
 import type os from 'node:os'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { ADDRESS_POLL_MS, createAddressBook, isLoopback, isPrivateIPv4, lanAddresses, plainAddress } from '../../src/server/lan/addresses.ts'
 import { createRateLimiter } from '../../src/server/lan/rate-limit.ts'
 import { ipv4 } from '../helpers/app.ts'
@@ -124,6 +124,27 @@ describe('who may connect to the phones\' listener', () => {
     book.noticeHost('192.168.1.9')
     expect(book.list().map((a) => a.address)).toEqual(['192.168.1.9'])
     expect(changes).toBe(2)
+  })
+
+  it('reads them every 30 s while watched, saying each time (onPoll) and when they change (onChange), until stopped', () => {
+    vi.useFakeTimers()
+    onTestFinished(() => void vi.useRealTimers())
+    let networks: ReturnType<typeof os.networkInterfaces> = { 'Wi-Fi': [ipv4('192.168.1.5', 24)] }
+    const said: string[] = []
+    const book = createAddressBook({
+      interfaces: () => networks,
+      onChange: () => said.push('change'),
+      onPoll: () => said.push('poll'),
+    })
+    book.watch()
+    book.watch() // once
+    vi.advanceTimersByTime(ADDRESS_POLL_MS)
+    networks = { 'Wi-Fi': [ipv4('192.168.1.7', 24)] }
+    vi.advanceTimersByTime(ADDRESS_POLL_MS)
+    expect(said).toEqual(['poll', 'change', 'poll'])
+    book.stop()
+    vi.advanceTimersByTime(ADDRESS_POLL_MS * 2)
+    expect(said).toHaveLength(3)
   })
 })
 

@@ -1,8 +1,9 @@
 import { Hono } from 'hono'
+import { getCookie } from 'hono/cookie'
 import { z } from 'zod'
 import type { LanClient, LanDevice } from '../../shared/types.ts'
 import { ApiError, parseWith, pathId, rateLimited, readJson, type AppEnv } from '../http.ts'
-import { clearDeviceCookie, setDeviceCookie } from './cookie.ts'
+import { clearDeviceCookie, deviceCookieName, isHttps, setDeviceCookie } from './cookie.ts'
 import type { LanController } from './controller.ts'
 import { peerAddress } from './guard.ts'
 import { PAIRING_TRIES } from './pairing.ts'
@@ -42,11 +43,9 @@ export function lanRoutes(lan: LanController): Hono<AppEnv> {
   })
 
   routes.get('/', (c) => c.json(lan.status()))
-  routes.put('/', async (c) => {
-    const { https, ...change } = parseWith(UpdateBody, await readJson(c.req))
-    if (https) throw new ApiError(400, 'https_unavailable', "HTTPS for phones isn't in this version of Binder yet")
-    return c.json(await lan.update(change))
-  })
+  routes.put('/', async (c) => c.json(await lan.update(parseWith(UpdateBody, await readJson(c.req)))))
+  // A new certificate authority for HTTPS (phones install it again), when the old one may have been copied.
+  routes.post('/https/rotate', async (c) => c.json(await lan.rotate()))
 
   routes.post('/pairing', (c) => c.json(lan.openPairing()))
   routes.delete('/pairing', (c) => {
@@ -85,11 +84,15 @@ export function lanRoutes(lan: LanController): Hono<AppEnv> {
       }
       throw new ApiError(400, 'wrong_code', "That code isn't right: check the code on the PC and type it again")
     }
-    const origin = c.req.header('origin') ?? `http://${c.req.header('host') ?? ''}`
+    const https = isHttps(c)
+    const origin = c.req.header('origin') ?? `${https ? 'https' : 'http'}://${c.req.header('host') ?? ''}`
     const userAgent = c.req.header('user-agent')?.slice(0, 300) ?? null
     const { device, cookie } = lan.devices.add({ name, ip: peer, origin, userAgent })
-    // A phone pairing again replaces itself: its old cookie is gone with this answer.
-    if (client.kind === 'device') lan.devices.forget(client.id)
+    // A phone pairing again replaces itself: its old cookie is gone with this answer. Over HTTPS, the device it paired
+    // as over HTTP, before HTTPS was on, goes too, when the browser sends that cookie as well (it isn't HTTPS's alone).
+    const overHttp = https ? lan.devices.verify(getCookie(c, deviceCookieName(false))) : null
+    const before = client.kind === 'device' ? client : overHttp
+    if (before) lan.devices.forget(before.id)
     lan.pairing.paired(device.name)
     setDeviceCookie(c, cookie)
     lan.log(`[phone] Paired ${JSON.stringify(device.name)} from ${from}`)

@@ -14,6 +14,8 @@ import {
   quitRequested,
   trayClickOpensWindow,
   trayIcon,
+  trayMenuTemplate,
+  trayToolTip,
   windowIcon,
 } from '../../electron/platform.ts'
 import { APP_LIBRARY_DIR, appLibraryDir } from '../../src/server/config.ts'
@@ -173,6 +175,83 @@ describe('the desktop app on each platform', () => {
     expect(trayClickOpensWindow('darwin')).toBe(false)
     expect(trayClickOpensWindow('win32')).toBe(true)
     expect(trayClickOpensWindow('linux')).toBe(true)
+  })
+
+  describe("the tray icon's menu", () => {
+    const actions = () => ({ open: vi.fn(), phoneAccess: vi.fn(), phoneSettings: vi.fn(), quit: vi.fn() })
+    const off = { enabled: false, available: true, listening: false, urls: [], error: null }
+    const on = {
+      enabled: true,
+      available: true,
+      listening: true,
+      urls: ['http://192.168.1.5:4322', 'http://172.20.0.1:4322'],
+      error: null,
+    }
+
+    it('keeps Open Binder and Quit Binder, with Phone access between them once the server is ready', () => {
+      const starting = trayMenuTemplate({ ready: false, lan: null }, actions())
+      expect(shape(starting)).toEqual([
+        { label: 'Open Binder', click: true },
+        { type: 'separator' },
+        { label: 'Phone access', type: 'checkbox', checked: false, enabled: false, click: true },
+        { label: 'Phone access…', enabled: false, click: true },
+        { type: 'separator' },
+        { label: 'Quit Binder', click: true },
+      ])
+      const ready = trayMenuTemplate({ ready: true, lan: off }, actions())
+      expect(ready.filter((item) => item.label?.startsWith('Phone access')).map((item) => item.enabled)).toEqual([true, true])
+      expect(trayToolTip(off)).toBe('Binder')
+    })
+
+    it('turns phone access on and off, and opens its settings', () => {
+      const act = actions()
+      const [open, , phones, settings, , quit] = trayMenuTemplate({ ready: true, lan: off }, act)
+      for (const item of [open, phones, settings, quit]) (item!.click as () => void)()
+      expect(act.phoneAccess).toHaveBeenCalledWith(true)
+      expect([act.open, act.phoneSettings, act.quit].map((fn) => fn.mock.calls.length)).toEqual([1, 1, 1])
+      const listening = trayMenuTemplate({ ready: true, lan: on }, act)
+      ;(listening[2]!.click as () => void)()
+      expect(act.phoneAccess).toHaveBeenLastCalledWith(false)
+    })
+
+    it('shows the address phones open while Binder listens for them, or why it cannot', () => {
+      const listening = trayMenuTemplate({ ready: true, lan: on }, actions())
+      expect(listening[2]).toMatchObject({ label: 'Phone access', checked: true })
+      expect(listening[3]).toEqual({ label: 'Phones: http://192.168.1.5:4322', enabled: false })
+      expect(trayToolTip(on)).toBe('Binder · phones: http://192.168.1.5:4322')
+      const secure = { ...on, urls: ['https://192.168.1.5:4323'] }
+      expect(trayToolTip(secure)).toBe('Binder · phones: https://192.168.1.5:4323')
+
+      const failure = "Couldn't listen on port 4322: another program is using it. Set BINDER_LAN_PORT to use another port"
+      const failed = trayMenuTemplate({ ready: true, lan: { ...off, enabled: true, error: failure } }, actions())
+      expect(failed[2]).toMatchObject({ checked: true })
+      expect(failed[3]).toEqual({ label: failure, enabled: false })
+      expect(trayToolTip({ ...off, enabled: true, error: failure })).toBe('Binder')
+      const nowhere = trayMenuTemplate({ ready: true, lan: { ...on, urls: [] } }, actions())
+      expect(nowhere[3]).toEqual({ label: "Phones: this PC isn't on a network a phone can reach", enabled: false })
+    })
+
+    it("says why phones can't use HTTPS while they open Binder over HTTP meanwhile", () => {
+      const failure = "Couldn't listen on port 4323 for HTTPS: another program is using it. Set BINDER_LAN_PORT to use another port"
+      const http = trayMenuTemplate({ ready: true, lan: { ...on, error: failure } }, actions())
+      expect(shape(http.slice(2, 6))).toEqual([
+        { label: 'Phone access', type: 'checkbox', checked: true, enabled: true, click: true },
+        { label: 'Phones: http://192.168.1.5:4322', enabled: false },
+        { label: failure, enabled: false },
+        { label: 'Phone access…', enabled: true, click: true },
+      ])
+    })
+
+    it("can't turn phone access on when BINDER_LAN=0 keeps it off, and says why", () => {
+      const off = 'Phone access is off for this Binder: it was started with BINDER_LAN=0'
+      const lan = { enabled: false, available: false, listening: false, urls: [], error: off }
+      const menu = trayMenuTemplate({ ready: true, lan }, actions())
+      expect(shape(menu.slice(2, 5))).toEqual([
+        { label: 'Phone access', type: 'checkbox', checked: false, enabled: false, click: true },
+        { label: off, enabled: false },
+        { label: 'Phone access…', enabled: true, click: true },
+      ])
+    })
   })
 
   it('gives the window an icon on Windows and Linux, and none on a Mac', () => {

@@ -12,7 +12,9 @@ import {
   readAuthority,
   rotateAuthority,
   type CertificateOptions,
+  type RunToolAsync,
 } from '../../src/server/lan/certs.ts'
+import type { RunTool } from '../../src/server/owner-only.ts'
 import { expectOwnerOnly } from '../helpers/private.ts'
 import { tempDir } from '../helpers/tmp.ts'
 
@@ -428,8 +430,8 @@ describe('certificates for phone access over HTTPS (lan/certs)', () => {
   it('removes the temporary copies a crashed write left, but not one another running Binder is writing', async () => {
     const o = options()
     fs.mkdirSync(o.dir)
-    const leftovers = [`ca-key.pem.${process.pid}.0badc0de.tmp`, 'leaf-key.pem.999999999.deadbeef.tmp']
-    const kept = [`ca-key.pem.${process.ppid}.feedface.tmp`, 'notes.txt']
+    const leftovers = [`ca-key.pem.${process.pid}.tmp`, 'leaf-key.pem.999999999.tmp']
+    const kept = [`ca-key.pem.${process.ppid}.tmp`, 'notes.txt']
     for (const file of [...leftovers, ...kept]) fs.writeFileSync(path.join(o.dir, file), 'a key')
     await ensureCertificates(o)
     expect(fs.readdirSync(o.dir).sort()).toEqual([...FILES, ...kept].sort())
@@ -437,22 +439,56 @@ describe('certificates for phone access over HTTPS (lan/certs)', () => {
 
   it("on Windows, makes each file private to its owner while it's still empty, then renames it into place", async () => {
     const o = options({ platform: 'win32' })
-    const restricted: Array<{ name: string; size: number }> = []
-    const ownerOnly = vi.fn((file: string) => void restricted.push({ name: path.basename(file), size: fs.statSync(file).size }))
-    await ensureCertificates({ ...o, ownerOnly })
-    expect(restricted.map((r) => r.name.replace(/\.\d+\.[0-9a-f]+\.tmp$/, ''))).toEqual(FILES)
-    expect(restricted.every((r) => r.size === 0)).toBe(true)
+    const restricted: Array<{ name: string; size: number; grant: string | undefined }> = []
+    // Windows' tools, as owner-only.ts runs them: whoami for the user's SID, then icacls on each file.
+    const run = vi.fn<RunTool>((command, args) => {
+      if (command.endsWith('whoami.exe')) return '"desktop-abc1\\me","S-1-5-21-1-2-3-1001"\r\n'
+      restricted.push({ name: path.basename(args[0]!), size: fs.statSync(args[0]!).size, grant: args[3] })
+      return ''
+    })
+    await ensureCertificates({ ...o, run })
+    expect(restricted.map((r) => r.name.replace(/\.\d+\.tmp$/, ''))).toEqual(FILES)
+    expect(restricted.every((r) => r.size === 0 && r.grant === '*S-1-5-21-1-2-3-1001:F')).toBe(true)
     expect(fs.readdirSync(o.dir).sort()).toEqual(FILES)
 
     // When Windows' tools can't, the files are still written, and the reason logged.
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
     onTestFinished(() => error.mockRestore())
-    const failing = vi.fn(() => Promise.reject(new Error('icacls failed')))
-    const rotated = await rotateAuthority({ ...o, ownerOnly: failing })
-    expect(failing).toHaveBeenCalledTimes(4)
+    const failing = vi.fn<RunTool>(() => {
+      throw new Error('icacls failed')
+    })
+    const rotated = await rotateAuthority({ ...o, run: failing })
+    expect(error).toHaveBeenCalledTimes(4)
     expect(error).toHaveBeenCalledWith(
       expect.stringMatching(/^\[phone\] Couldn't make .*ca-key\.pem\..* private to this user: icacls failed$/),
     )
+    expectWholeChain(rotated)
+    expect(fs.readdirSync(o.dir).sort()).toEqual(FILES)
+  })
+
+  it('on Windows, asks who the user is once, and waits for its tools and for files held open, as Binder goes on', async () => {
+    const o = options({ platform: 'win32' })
+    // Windows' tools answering later, as they do when run without blocking.
+    const user = '"desktop-abc1\\me","S-1-5-21-1-2-3-1001"\r\n'
+    const run = vi.fn<RunToolAsync>(async (command) => (command.endsWith('whoami.exe') ? user : ''))
+    await ensureCertificates({ ...o, run })
+    await ensureCertificates({ ...o, addresses: ['192.168.1.7'], run })
+    const runs = (tool: string) => run.mock.calls.filter(([command]) => path.win32.basename(command) === tool).length
+    expect([runs('whoami.exe'), runs('icacls.exe')]).toEqual([1, 6])
+
+    // Antivirus scanning a file just written: it's renamed into place once let go, and Binder serves meanwhile.
+    const rename = fs.promises.rename
+    const order: string[] = []
+    const held = vi.spyOn(fs.promises, 'rename').mockImplementation(async (from, to) => {
+      if (order.length > 0) return rename(from, to)
+      order.push('held')
+      setTimeout(() => order.push('Binder went on'), 0)
+      throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' })
+    })
+    onTestFinished(() => held.mockRestore())
+    const rotated = await rotateAuthority({ ...o, run })
+    expect(order).toEqual(['held', 'Binder went on'])
+    expect(held).toHaveBeenCalledTimes(5)
     expectWholeChain(rotated)
     expect(fs.readdirSync(o.dir).sort()).toEqual(FILES)
   })

@@ -21,6 +21,7 @@ import {
   type UtilityProcess,
   utilityProcess,
 } from 'electron'
+import type { LanSummary } from '../src/shared/types.ts'
 import { externalUrl, isAppUrl, permissionAllowed } from './links.ts'
 import { rotateLog } from './log.ts'
 import { startingPage, startupFailure } from './messages.ts'
@@ -32,9 +33,11 @@ import {
   quitRequested,
   trayClickOpensWindow,
   trayIcon,
+  trayMenuTemplate,
+  trayToolTip,
   windowIcon,
 } from './platform.ts'
-import type { ServerMessage } from './server.ts'
+import type { AppMessage, ServerMessage } from './server.ts'
 
 app.setName('Binder')
 // Before any window or tray icon: Windows groups them, the taskbar button and the Start menu shortcut by this ID. The
@@ -67,6 +70,8 @@ let appUrl: string | null = null
 let status = 'Starting…'
 let window: BrowserWindow | null = null
 let tray: Tray | null = null
+/** Phone access, as the server last said (the tray shows it). */
+let lan: LanSummary | null = null
 /** Windows: the hidden window that hears the session end (stopWithWindows). */
 let sessionListener: BaseWindow | null = null
 let quitting = false
@@ -162,6 +167,12 @@ function showWindow(): void {
   load(win, appUrl ?? startingPage(status))
 }
 
+/** Shows Binder's window on one of its pages (`/settings#phone-access`), once the server is ready. */
+function showPage(page: string): void {
+  showWindow()
+  if (window && appUrl) load(window, new URL(page, appUrl).href)
+}
+
 /**
  * Windows, the first time the window is closed: says Binder is still running, and where its icon is. Windows 11 tucks
  * a new tray icon away under the notification area's arrow, so without this Binder seems gone while it still keeps the
@@ -210,9 +221,13 @@ function startServer(): void {
     if (message.type === 'log') log?.write(`${message.line}\n`)
     else if (message.type === 'upgrading') setStatus('Backing up your library before upgrading it (a few seconds)…')
     else if (message.type === 'failed') fail(startupFailure(message, paths.port))
-    else if (message.type === 'ready') {
+    else if (message.type === 'lan') {
+      lan = message.summary
+      updateTray()
+    } else if (message.type === 'ready') {
       appUrl = message.url
       if (window) load(window, message.url)
+      updateTray()
     }
   })
   child.on('exit', (code) => {
@@ -258,13 +273,24 @@ function allowPermissions(): void {
   })
 }
 
-/** The tray icon's menu. */
+/** The tray icon's menu: Open Binder, Phone access, and Quit Binder (trayMenuTemplate). */
 function trayMenu(): MenuItemConstructorOptions[] {
-  return [
-    { label: 'Open Binder', click: showWindow },
-    { type: 'separator' },
-    { label: 'Quit Binder', click: () => app.quit() },
-  ]
+  return trayMenuTemplate(
+    { ready: appUrl !== null, lan },
+    {
+      open: showWindow,
+      phoneAccess: (enabled) => server?.postMessage({ type: 'lan', enabled } satisfies AppMessage),
+      phoneSettings: () => showPage('/settings#phone-access'),
+      quit: () => app.quit(),
+    },
+  )
+}
+
+/** Shows what's new in the tray's menu and tooltip: the server is ready, or phone access changed. */
+function updateTray(): void {
+  if (!tray) return
+  tray.setContextMenu(Menu.buildFromTemplate(trayMenu()))
+  tray.setToolTip(trayToolTip(lan))
 }
 
 function buildMenus(): void {
@@ -276,8 +302,7 @@ function buildMenus(): void {
   if (icon.isEmpty()) appLog(`No tray icon at ${file}: run pnpm icons.`)
   if (template) icon.setTemplateImage(true)
   tray = new Tray(icon)
-  tray.setToolTip('Binder')
-  tray.setContextMenu(Menu.buildFromTemplate(trayMenu()))
+  updateTray()
   // Windows and Linux: a click opens Binder, and the menu is a right-click away. A Mac's click shows the menu.
   if (trayClickOpensWindow(process.platform)) tray.on('click', showWindow)
 }
@@ -320,7 +345,7 @@ function stopServer(): void {
     clearTimeout(force)
     app.quit()
   })
-  child.postMessage({ type: 'stop' })
+  child.postMessage({ type: 'stop' } satisfies AppMessage)
 }
 
 /** Whether the process is still running. */
