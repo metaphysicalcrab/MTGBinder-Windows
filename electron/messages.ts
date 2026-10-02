@@ -1,3 +1,5 @@
+import { windowsKeptPortAdvice } from '../src/server/startup.ts'
+
 /**
  * Why Binder couldn't start, as the app's dialog says it. The server's own lines, but for a port in use, and on Windows
  * a port it refuses: most often one Windows keeps for Hyper-V, WSL or Docker, where the server's "start it with PORT
@@ -9,9 +11,8 @@ export function startupFailure(error: { code: string; message: string }, port: n
   }
   if (error.code === 'port_denied' && platform === 'win32') {
     return (
-      `Windows won't let Binder use port ${port}: it may keep that port for Hyper-V, WSL or Docker. In a terminal, ` +
-      '`netsh interface ipv4 show excludedportrange protocol=tcp` lists the ports it keeps. Restarting the PC often ' +
-      'frees it; or set a PORT environment variable for your account to a port outside those ranges, then open Binder again.'
+      `Windows won't let Binder use port ${port}: it may keep that port for Hyper-V, WSL or Docker. ` +
+      `${windowsKeptPortAdvice('PORT')}, then open Binder again.`
     )
   }
   return error.message

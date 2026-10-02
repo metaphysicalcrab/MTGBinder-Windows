@@ -117,8 +117,10 @@ export function makeLanApp(deps: Partial<AppDeps> = {}, options: Partial<LanOpti
       headers.set('origin', phone.origin ?? `http://${host}`)
     }
     if (phone.cookie) headers.set('cookie', phone.cookie)
-    const env = { listener: phone.listener ?? 'lan', incoming: { socket: { remoteAddress: phone.peer ?? '192.168.1.40' } } }
-    return app.request(url, { ...init, headers }, env as AppEnv['Bindings'])
+    // An https:// URL came over TLS, as on the phones' HTTPS listener (isHttps reads the connection).
+    const socket = { remoteAddress: phone.peer ?? '192.168.1.40', encrypted: url.startsWith('https:') }
+    const env = { listener: phone.listener ?? 'lan', incoming: { socket } }
+    return app.request(url, { ...init, headers }, env as unknown as AppEnv['Bindings'])
   }
 
   async function local(url: string, init: RequestInit = {}): Promise<Response> {

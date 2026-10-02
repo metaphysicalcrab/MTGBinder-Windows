@@ -276,6 +276,7 @@ function allowPermissions(): void {
 /** The tray icon's menu: Open Binder, Phone access, and Quit Binder (trayMenuTemplate). */
 function trayMenu(): MenuItemConstructorOptions[] {
   return trayMenuTemplate(
+    process.platform,
     { ready: appUrl !== null, lan },
     {
       open: showWindow,

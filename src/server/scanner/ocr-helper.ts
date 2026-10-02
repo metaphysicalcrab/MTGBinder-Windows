@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { z } from 'zod'
+import { windowsPowerShell } from '../platform.ts'
 import { buildOcrHelper } from './ocr-client.ts'
 
 /** Which OCR helper reads scans on this computer (spec §5.1.4), and how to get it ready. */
@@ -74,13 +75,11 @@ export function ocrHelper(input: {
 
 /**
  * Runs a PowerShell script the way Binder runs its OCR helper on Windows: in Windows PowerShell 5.1 by its full path
- * (never `pwsh`, PowerShell 7, which can't reach WinRT, nor whatever is first on the PATH), without the user's profile,
- * and past the execution policy, whose default refuses every script (a policy set by Group Policy still wins).
+ * (windowsPowerShell: never `pwsh`, nor whatever is first on the PATH), without the user's profile, and past the
+ * execution policy, whose default refuses every script (a policy set by Group Policy still wins).
  */
 export function powershellCommand(script: string, env: NodeJS.ProcessEnv = process.env): string[] {
-  const windows = env.SystemRoot || 'C:\\Windows'
-  const powershell = path.win32.join(windows, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
-  return [powershell, '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script]
+  return [...windowsPowerShell(env), '-ExecutionPolicy', 'Bypass', '-File', script]
 }
 
 /** What the Windows helper's -Check found: the languages Windows OCR reads on this PC, and the English one, if any. */

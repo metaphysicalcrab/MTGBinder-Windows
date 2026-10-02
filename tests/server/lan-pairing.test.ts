@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { createDeviceStore } from '../../src/server/lan/devices.ts'
 import { PAIRING_MS } from '../../src/server/lan/pairing.ts'
 import type { ApiErrorBody, LanDevice, LanPairing, LanStatus } from '../../src/shared/types.ts'
-import { body, json, makeLanApp } from '../helpers/app.ts'
+import { body, ipv4, json, makeLanApp } from '../helpers/app.ts'
 import { createTestDb } from '../helpers/db.ts'
 import { expectOwnerOnly } from '../helpers/private.ts'
 import { tempDir } from '../helpers/tmp.ts'
@@ -186,6 +186,20 @@ describe('pairing a phone (spec §5.10)', () => {
     expect(await error(await pair(app, { code: window.code, name: '  ' }))).toEqual([400, 'bad_request'])
   })
 
+  it("says when this computer isn't on a network a phone can reach, naming it as Settings does", async () => {
+    // On a Mac, with only its loopback: "this Mac", as Settings says it there ("this PC" on Windows).
+    const app = makeLanApp({}, { interfaces: () => ({ lo0: [ipv4('127.0.0.1', 8, true)] }), platform: 'darwin' })
+    expect((await app.local('/api/lan', json({ enabled: true }, 'PUT'))).status).toBe(200)
+    const port = app.lan.status().port
+    expect(app.lines).toContain(`[phone] Listening for phones on port ${port}, but this Mac isn't on a network a phone can reach`)
+    expect(await body(await app.local('/api/lan/pairing', { method: 'POST' }))).toEqual({
+      error: { code: 'no_address', message: "This Mac isn't on a network a phone can reach: connect it to the Wi-Fi first" },
+    })
+    expect(await body(await app.local('/api/lan', json({ address: '10.9.9.9' }, 'PUT')))).toEqual({
+      error: { code: 'bad_address', message: "10.9.9.9 isn't one of this Mac's addresses" },
+    })
+  })
+
   it('replaces a phone that pairs again', async () => {
     const app = makeLanApp()
     const old = await app.pair('Pixel 8')
@@ -221,7 +235,7 @@ describe('paired phones (spec §5.10)', () => {
     expect(await error(await app.local('/api/lan/forget', { method: 'POST' }))).toEqual([404, 'not_found'])
   })
 
-  it('forgets every phone by changing the secret, so a database brought back from a backup lets none in', async () => {
+  it('forgets every phone by changing the secret, so a database brought back from a backup lets none in, nor lists them', async () => {
     const app = makeLanApp()
     const cookie = await app.pair('Pixel 8')
     const secret = fs.readFileSync(path.join(app.dir, 'secret'), 'utf8')
@@ -229,7 +243,10 @@ describe('paired phones (spec §5.10)', () => {
     expect((await app.local('/api/lan/forget-all', { method: 'POST' })).status).toBe(204)
     expect(fs.readFileSync(path.join(app.dir, 'secret'), 'utf8')).not.toBe(secret)
     expectOwnerOnly(path.join(app.dir, 'secret'))
-    // The backup's rows come back, and Binder starts again: the phone's cookie still doesn't work.
+    // Every id given out so far, in one line.
+    expect(fs.readFileSync(path.join(app.dir, 'forgotten'), 'utf8')).toBe('1-1\n')
+    // The backup's rows come back, and Binder starts again: the phone's cookie still doesn't work, nor does Settings
+    // list it as paired.
     const insert = app.db.prepare(
       `INSERT INTO lan_devices (id, name, token_hash, created_at, last_seen_at, last_ip, origin, user_agent)
        VALUES (@id, @name, @token_hash, @created_at, @last_seen_at, @last_ip, @origin, @user_agent)`,
@@ -237,11 +254,41 @@ describe('paired phones (spec §5.10)', () => {
     for (const row of rows) insert.run(row)
     const restarted = makeLanApp({ db: app.db }, { dir: app.dir })
     expect((await restarted.request('/api/collection/stats', {}, { cookie })).status).toBe(401)
+    expect(restarted.lan.devices.list()).toEqual([])
+    // A phone paired now gets in.
+    const next = await restarted.pair('Pixel 9')
+    expect((await restarted.request('/api/collection/stats', {}, { cookie: next })).status).toBe(200)
     // Before the secret changed, the same rows would have let it in.
+    for (const row of rows) insert.run(row)
     const before = makeLanApp({ db: app.db })
     fs.mkdirSync(before.dir, { recursive: true })
     fs.writeFileSync(path.join(before.dir, 'secret'), secret)
     expect((await before.request('/api/collection/stats', {}, { cookie })).status).toBe(200)
+  })
+
+  it("never gives a new phone a forgotten one's id, though a backup brought back counts ids from before", async () => {
+    const app = makeLanApp()
+    await app.pair('A')
+    await app.pair('B')
+    expect((await app.local('/api/lan/devices/2', { method: 'DELETE' })).status).toBe(204)
+    // A backup from when only A was paired comes back, counting 1 id given out, and Binder starts again.
+    app.db.prepare("UPDATE sqlite_sequence SET seq = 1 WHERE name = 'lan_devices'").run()
+    const restarted = makeLanApp({ db: app.db }, { dir: app.dir })
+    const c = await restarted.pair('C')
+    expect(c).toMatch(/^binder_device=3\./)
+    expect(await body(await restarted.request('/api/lan/me', {}, { cookie: c }))).toEqual({ client: 'device', id: 3, name: 'C' })
+    expect(restarted.lan.devices.list().map((d) => [d.id, d.name])).toEqual([
+      [1, 'A'],
+      [3, 'C'],
+    ])
+    // A backup from before any phone paired, which counts none: still past every forgotten id.
+    for (const id of [1, 3]) expect((await restarted.local(`/api/lan/devices/${id}`, { method: 'DELETE' })).status).toBe(204)
+    app.db.prepare('DELETE FROM lan_devices').run()
+    app.db.prepare("DELETE FROM sqlite_sequence WHERE name = 'lan_devices'").run()
+    const again = makeLanApp({ db: app.db }, { dir: app.dir })
+    const d = await again.pair('D')
+    expect(d).toMatch(/^binder_device=4\./)
+    expect((await again.request('/api/collection/stats', {}, { cookie: d })).status).toBe(200)
   })
 
   it('keeps a phone forgotten on its own forgotten when a backup brings its row back', async () => {
@@ -263,9 +310,9 @@ describe('paired phones (spec §5.10)', () => {
     expect((await restarted.request('/api/collection/stats', {}, { cookie: stolen })).status).toBe(401)
     expect((await restarted.request('/api/collection/stats', {}, { cookie: kept })).status).toBe(200)
     expect(restarted.lan.devices.list().map((d) => d.name)).toEqual(['Pixel 8'])
-    // Forgetting every phone changes the secret, so the list is no longer needed.
+    // Forgetting every phone changes the secret: every id given out so far is forgotten, in one line.
     expect((await restarted.local('/api/lan/forget-all', { method: 'POST' })).status).toBe(204)
-    expect(fs.existsSync(forgotten)).toBe(false)
+    expect(fs.readFileSync(forgotten, 'utf8')).toBe('1-2\n')
   })
 
   it("drops the phones of a library moved or brought back without its lan/ folder, which can't be let in again", async () => {
@@ -351,7 +398,17 @@ describe('the devices secret', () => {
         contents: '',
       },
     ])
-    expect(devices.verify(cookie)).toEqual({ id: 1, name: 'Pixel 8' })
+    expect(devices.verify(cookie, { https: false })).toEqual({ id: 1, name: 'Pixel 8' })
     expect(fs.readdirSync(dir)).toEqual(['secret'])
+  })
+
+  it('removes the temporary copies a crashed write left, but not one another running Binder is writing', () => {
+    const dir = path.join(tempDir('binder-lan-'), 'lan')
+    fs.mkdirSync(dir)
+    const leftovers = [`secret.${process.pid}.tmp`, 'forgotten.999999999.tmp']
+    const kept = [`secret.${process.ppid}.tmp`, 'secret', 'notes.tmp']
+    for (const file of [...leftovers, ...kept]) fs.writeFileSync(path.join(dir, file), 'a secret')
+    createDeviceStore({ db: createTestDb(), dir })
+    expect(fs.readdirSync(dir).sort()).toEqual([...kept].sort())
   })
 })

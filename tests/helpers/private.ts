@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { expect } from 'vitest'
+import { windowsSystemPath } from '../../src/server/platform.ts'
 
 /**
  * Checks that only the file's owner can read it. On macOS and Linux that's mode 600. Windows has no mode bits (Node
@@ -14,7 +15,7 @@ export function expectOwnerOnly(file: string): void {
     expect(fs.statSync(file).mode & 0o777).toBe(0o600)
     return
   }
-  const icacls = path.win32.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'icacls.exe')
+  const icacls = windowsSystemPath('icacls.exe')
   // `<file> PC\me:(F)`, then a blank line and a summary; (I) marks an inherited entry. The marks aren't translated.
   const listing = execFileSync(icacls, [file], { encoding: 'utf8', windowsHide: true })
   const entries = listing.slice(file.length).split(/\r?\n/).map((line) => line.trim()).filter((line) => /:\(.*\)$/.test(line))

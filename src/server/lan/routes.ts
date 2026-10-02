@@ -89,13 +89,15 @@ export function lanRoutes(lan: LanController): Hono<AppEnv> {
         `That code isn't right: check the code on the PC and type it again (${left} ${left === 1 ? 'try' : 'tries'} left)`,
       )
     }
+    // The page it paired from (the guard has checked that its Origin names this Host), over HTTPS or not as the
+    // connection was: the device's cookie works only that way.
     const https = isHttps(c)
-    const origin = c.req.header('origin') ?? `${https ? 'https' : 'http'}://${c.req.header('host') ?? ''}`
+    const origin = `${https ? 'https' : 'http'}://${c.req.header('host') ?? ''}`
     const userAgent = c.req.header('user-agent')?.slice(0, 300) ?? null
     const { device, cookie } = lan.devices.add({ name, ip: peer, origin, userAgent })
     // A phone pairing again replaces itself: its old cookie is gone with this answer. Over HTTPS, the device it paired
     // as over HTTP, before HTTPS was on, goes too, when the browser sends that cookie as well (it isn't HTTPS's alone).
-    const overHttp = https ? lan.devices.verify(getCookie(c, deviceCookieName(false))) : null
+    const overHttp = https ? lan.devices.verify(getCookie(c, deviceCookieName(false)), { https: false }) : null
     const before = client.kind === 'device' ? client : overHttp
     if (before) lan.devices.forget(before.id)
     lan.pairing.paired(device.name)

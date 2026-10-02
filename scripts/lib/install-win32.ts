@@ -12,6 +12,7 @@ import path from 'node:path'
 import type { CliOptions } from 'electron-builder'
 import { QUIT_SWITCH } from '../../electron/platform.ts'
 import { ROOT_DIR } from '../../src/server/config.ts'
+import { windowsSystemPath } from '../../src/server/platform.ts'
 import { electronBuilder, firstLine, InstallError, step } from './build.ts'
 import type { DesktopApp } from './install.ts'
 
@@ -49,13 +50,17 @@ const output: Output = (file, args) =>
   execFileSync(file, args, { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] })
 
 /**
- * Whether Binder.exe is running: the installed app, or one run from release\. Asks Windows' tasklist, by its full path
- * rather than whatever the PATH finds first. False when tasklist can't say.
+ * Whether this user's Binder.exe is running: the installed app, or one run from release\. Asks Windows' tasklist, by
+ * its full path rather than whatever the PATH finds first, for this user's processes alone: another account signed in
+ * on the PC (fast user switching) has its own Binder and library, which neither packaging nor a move touches, and
+ * which this user couldn't quit. False when tasklist can't say.
  */
 export function binderRunning(run: Output = output, env: NodeJS.ProcessEnv = process.env): boolean {
-  const tasklist = path.win32.join(env.SystemRoot || 'C:\\Windows', 'System32', 'tasklist.exe')
   try {
-    return listsImage(run(tasklist, ['/FI', `IMAGENAME eq ${EXE}`, '/FO', 'CSV', '/NH']))
+    const user = env.USERNAME || os.userInfo().username
+    const owner = env.USERDOMAIN ? `${env.USERDOMAIN}\\${user}` : user
+    const filters = ['/FI', `IMAGENAME eq ${EXE}`, '/FI', `USERNAME eq ${owner}`]
+    return listsImage(run(windowsSystemPath('tasklist.exe', env), [...filters, '/FO', 'CSV', '/NH']))
   } catch {
     return false
   }
@@ -120,7 +125,7 @@ function windowsDeps(): WindowsDeps {
 
 /**
  * Asks a running Binder to quit (`Binder.exe --quit`, which hands the request to the running one and exits) and waits
- * for every Binder.exe to be gone, up to `waitMs`. Returns whether they are.
+ * for every Binder.exe of this user's to be gone, up to `waitMs`. Returns whether they are.
  */
 export async function quitBinder(exe: string, deps: WindowsDeps, waitMs = QUIT_WAIT_MS): Promise<boolean> {
   try {

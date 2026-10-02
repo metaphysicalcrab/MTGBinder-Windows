@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
 import path from 'node:path'
-import { describe, expect, it, onTestFinished, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { appLibraryNote, listenFailure, locationWarnings, portProblem, stopOnSignals } from '../../src/server/startup.ts'
 import { tempDir } from '../helpers/tmp.ts'
 

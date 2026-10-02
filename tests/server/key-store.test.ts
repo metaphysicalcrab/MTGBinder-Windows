@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { createKeyStore } from '../../src/server/ai/key-store.ts'
+import { windowsSystemPath } from '../../src/server/platform.ts'
 import { canSymlink, expectOwnerOnly } from '../helpers/private.ts'
 import { tempDir } from '../helpers/tmp.ts'
 
@@ -144,15 +145,14 @@ describe('a .env made on Windows', () => {
     store.write('sk-ant-api03-good-key-1234')
     store.write('sk-ant-api03-new-key-2222')
     const temp = `${envPath}.${process.pid}.tmp`
-    const system32 = path.win32.join(process.env.SystemRoot ?? process.env.windir ?? 'C:\\Windows', 'System32')
     const restrict = {
-      command: path.win32.join(system32, 'icacls.exe'),
+      command: windowsSystemPath('icacls.exe'),
       args: [temp, '/inheritance:r', '/grant:r', '*S-1-5-21-1004336348-1177238915-682003330-1001:F'],
       contents: '',
     }
     // The user is asked for once; each save restricts its own temporary file before the key goes in.
     expect(calls).toEqual([
-      { command: path.win32.join(system32, 'whoami.exe'), args: ['/user', '/fo', 'csv', '/nh'] },
+      { command: windowsSystemPath('whoami.exe'), args: ['/user', '/fo', 'csv', '/nh'] },
       restrict,
       restrict,
     ])
