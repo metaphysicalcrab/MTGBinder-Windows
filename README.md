@@ -1,15 +1,32 @@
 # Binder
 
-Personal MTG collection manager for this Mac: open Binder.app, or run `pnpm start` in a terminal. Either way it's at
-http://localhost:4321.
+Personal MTG collection manager for your Mac or Windows PC, with an Android phone as its companion. On the computer,
+open the desktop app (Binder.app on a Mac, Binder from the Start menu on Windows), or run `pnpm start` in a terminal.
+Either way it's at http://localhost:4321. A paired phone opens the same Binder over the Wi-Fi (see Your phone).
 
 ## First run
+
+On a Mac, in Terminal:
 
 ```bash
 pnpm install
 pnpm run setup      # builds the OCR helper, creates data/binder.db, imports Scryfall card data (~1 min)
 pnpm start          # builds the UI and serves everything at http://localhost:4321
 ```
+
+On a Windows 10 or 11 PC, in PowerShell:
+
+```powershell
+pnpm install        # nothing to compile: no Visual Studio or Python needed
+pnpm run setup      # checks that Windows OCR reads English, creates data\binder.db, imports Scryfall card data
+pnpm start          # builds the UI and serves everything at http://localhost:4321
+```
+
+Both need Node 24 and pnpm 10 (`.node-version` and `package.json`'s `packageManager` name the versions). It's
+`pnpm run setup`, not `pnpm setup`, which is pnpm's own command for setting pnpm itself up. Ctrl+C stops Binder in the
+terminal, closing the library first. An environment variable goes before the command on a Mac (`PORT=4330 pnpm start`),
+and in a statement of its own in PowerShell (`$env:PORT=4330; pnpm start`; it lasts until the window closes, and
+`Remove-Item Env:PORT` clears it).
 
 Binder opens on **Library**. With an empty collection, it shows three ways to start: scan your cards, import a CSV,
 or scan or build a deck. Press `?` (anywhere but a text box or dropdown) for the keyboard shortcuts.
@@ -31,8 +48,9 @@ pnpm move-library   # copies data/ to ~/Library/Application Support/Binder; data
 Then open Binder from Spotlight, Launchpad, or Applications, and enter your Anthropic API key again in Settings (it
 isn't copied). Closing the window keeps Binder running in the menu bar, so scans finish and card data refreshes;
 click the menu-bar icon, then **Open Binder** (or click the Dock icon) to open it again; **Quit Binder** in the
-menu-bar icon's menu, or Cmd+Q, stops it. Opening Binder again while it runs brings its window forward, and links to
-Scryfall and other sites open in your browser.
+menu-bar icon's menu, or Cmd+Q, stops it. The same menu turns **Phone access** on or off (Your phone). Opening Binder
+again while it runs brings its window forward, and links to Scryfall and other sites open in your browser.
+`/Applications/Binder.app/Contents/MacOS/Binder --quit` in Terminal quits a running Binder as Quit Binder does.
 The first time you open Scan, macOS asks whether Binder may use the camera; your iPhone appears through Continuity
 Camera as it does in a browser. If it's refused (by mistake, or after an update), turn Binder on in System Settings →
 Privacy & Security → Camera, then quit and reopen Binder; if its switch is already on and the camera still won't
@@ -40,9 +58,145 @@ start, clear the old permission with `tccutil reset Camera local.binder.app` in 
 Binder.app is signed on this Mac, not by a developer account, so macOS may ask again after an update.
 
 Binder.app keeps everything in `~/Library/Application Support/Binder`: the library, its backups and card data, the
-key, its window's own files (`Electron/`), and the server's log (`Logs/binder.log`, the run before in
-`binder.previous.log`). To update it, quit Binder and run `pnpm app` again. `pnpm start` still runs Binder from the
-terminal on the project's `data/`, and says so when Binder.app keeps its own library.
+key, phone access's own files (`lan/`), its window's own files (`Electron/`), and the server's log (`Logs/binder.log`,
+the run before in `binder.previous.log`). To update it, quit Binder and run `pnpm app` again. `pnpm start` still runs
+Binder from the terminal on the project's `data/`, and says so when Binder.app keeps its own library.
+
+## Binder on Windows
+
+On a Windows PC, Binder is a desktop app too, with its own window and an icon in the notification area, beside the
+clock. Build it and install it with:
+
+```powershell
+pnpm app            # draws the icons, builds the UI, packages Binder and its installer, installs Binder
+```
+
+It installs for your Windows account only, without asking for an administrator: in `%LOCALAPPDATA%\Programs\binder`,
+with a Start menu shortcut, one on the desktop, and an entry in Settings → Apps to uninstall it (which never deletes
+your library). The installer runs silently and doesn't open Binder. If Binder is running, `pnpm app` asks it to quit
+first and waits up to 10 seconds; if it doesn't quit, quit it yourself (right-click its icon → **Quit Binder**) and run
+`pnpm app` again. The first build downloads Electron and the installer's tools for Windows. The installer isn't signed,
+so Windows may warn about it on another PC. `pnpm app --no-install` builds `release\win-unpacked\Binder.exe` without
+installing it.
+
+The first time, move your library into it, with Binder quit:
+
+```powershell
+pnpm move-library   # copies data\ to %LOCALAPPDATA%\Binder; data\ is left as it was
+```
+
+Then open Binder from the Start menu, and enter your Anthropic API key again in Settings (it isn't copied). Closing the
+window keeps Binder running, so scans finish and card data refreshes; the first time, Windows says so. Click the
+notification-area icon to open Binder again, or right-click it for **Open Binder**, **Phone access** (Your phone), and
+**Quit Binder**, which stops it (so do Ctrl+Q and File → Quit Binder in the window). Windows 11 may keep the icon under
+the ^ arrow: Settings → Personalization → Taskbar → Other system tray icons puts it on the taskbar. Opening Binder again
+while it runs brings its window forward, and links to Scryfall and other sites open in your browser. The window's menu
+bar shows when you press Alt. Shutting down, restarting, or signing out stops Binder too, closing the library first. In
+PowerShell, `& "$env:LOCALAPPDATA\Programs\binder\Binder.exe" --quit` quits a running Binder as Quit Binder does.
+Binder uses the camera unless Windows keeps it from desktop apps: if Scan says Binder isn't allowed to use the camera,
+turn on **Camera access** and **Let desktop apps access your camera** in Settings → Privacy & security → Camera, then
+press **Start it again**.
+
+Binder keeps everything in `%LOCALAPPDATA%\Binder`: the library, its backups and card data, the key, phone access's own
+files (`lan\`), its window's own files (`Electron\`), and the server's log (`Logs\binder.log`, the run before in
+`binder.previous.log`). That's your account's Local folder: not Roaming (the library is large, and this PC's own), and
+not Documents, which OneDrive may sync. To update Binder, run `pnpm app` again. `pnpm start` still runs Binder from the
+terminal on the project's `data\`, and says so when the app keeps its own library. Phones paired with one library pair
+again with the other.
+
+## Your phone
+
+An Android phone on the same Wi-Fi as the computer can use Binder too. In Chrome it opens the computer's Binder, every
+page fitted to a phone, and it scans cards with its own camera into the same library. Nothing is installed on the
+phone, and nothing goes beyond your own network: the computer keeps the library and does the work.
+
+**Turning it on.** On the computer, turn on Settings → Phone access, or choose **Phone access** in the menu of Binder's
+notification-area (or menu-bar) icon. Binder then also listens on port 4322 for phones, from the computer's own home or
+office networks only (addresses like 192.168.x.x, 10.x.x.x, or 172.16–31.x.x). It stays on through restarts until it's
+turned off; while it's off, Binder opens only on the computer. Settings shows the address phones open (like
+`http://192.168.1.5:4322`) as text and as a QR code, and the terminal's `[phone]` line and the icon's menu say it too.
+- On Windows, the first time, Windows Defender Firewall asks whether Binder may use the network (for `pnpm start`, it
+  asks about Node.js): allow it on **Private networks**. If that was cancelled, allow Binder in Windows Security →
+  Firewall & network protection → Allow an app through firewall. A network Windows calls **Public** blocks phones
+  whatever the answer was. Settings says when the PC's is, and how to make it Private: on Windows 11, Settings → Network
+  & internet → Wi-Fi → the network's properties → Network profile type → Private network; on Windows 10, Settings →
+  Network & Internet → Wi-Fi → the network → Network profile → Private.
+- On a Mac, macOS may ask whether Binder may accept incoming connections: choose Allow. It may ask again after
+  `pnpm app` rebuilds Binder.app.
+
+A phone that can't reach Binder says it's connecting until it can: check that it's on the same Wi-Fi, and that Binder
+runs on the computer with phone access on.
+
+**Pairing.** Each phone pairs once. On the computer, Settings → Phone access → **Pair a phone** shows a QR code and an
+8-digit code, good for 5 minutes and for one phone. On the phone, scan the QR code with the camera and open its link in
+Chrome: the phone pairs at once. Or open the address in Chrome and type the code. The phone is named after its model
+(over HTTPS; else "Android phone"), which you can change before pairing. It then stays paired: Chrome keeps its cookie
+for 400 days, renewed each day the phone uses Binder. A phone that types 5 wrong codes waits for a new code, and 20
+wrong codes from anywhere end it. Settings → Phone access lists the paired phones, with when and from where each was
+last seen: rename one, **Forget** one, or **Forget all phones**. A forgotten phone goes back to the pairing page the
+next time it uses Binder, and restoring an older backup doesn't let it in again. On the phone, Settings → This phone →
+**Forget this phone** does the same from there.
+
+**What a phone can do.** Everything you do with your library: Library, Search, Sets, Decks, Scan, Playtest (on a
+tablet), and Brainstorm (with the key set on the computer); a card data refresh, at most once an hour; and the Scanner
+and Deckbuilder settings. Only the computer sets the Anthropic API key, makes backups, shows or compacts the library
+file, and changes phone access itself (pairing, forgetting phones, HTTPS): a phone's Settings leaves those out, and
+anything else that tries says "Change this on the PC running Binder". On a phone, the pages are along the bottom
+(Library, Search, Scan, Decks, and More for Sets, Brainstorm, Playtest, and Settings); Back closes a card's details, a
+dialog, or a menu; the deck editor shows Cards, Add cards, and Stats one at a time; and in Brainstorm, Enter makes a new
+line and **Send** sends.
+
+**Scanning with the phone.** Over plain HTTP, Chrome gives a page no live camera, so Scan takes photos: **Take a photo
+of the card** opens the camera app, and **Choose a photo** picks one already taken. Hold the phone upright over one
+card, filling most of the picture, without glare. Binder then shows the photo with the card guide: drag the guide onto
+the card, pinch (or use the slider) to fit it to the card's edges, and tap **Use photo**. The phone crops the photo to
+the guide, shrinks it, and sends it as the computer's camera would; the next photo starts with the guide where you left
+it. A photo Chrome can't read says to turn off HEIF photos in the camera's settings. With HTTPS (below), Scan uses the
+live camera as on the computer, starting with the phone's back camera, and offers **Take a photo** beside it; **Auto
+(mounted)** is for a phone mounted over the mat. Below the camera, the capture button stays above the tabs, with how
+many scans are ready and to check: tap those words to go to the queue.
+
+**HTTPS.** Chrome lets only a secure page use the live camera or be installed as an app, so Binder can serve phones
+over HTTPS too, with a certificate of its own that each phone installs once. Everything else works without it.
+1. On the computer, in Settings → Phone access, turn on **Use HTTPS**. Phones then open Binder at
+   `https://<address>:4323`, and the HTTP address sends pages there.
+2. On the phone, in Chrome, open the setup address Settings shows (`http://<address>:4322/phone-setup`, or scan its QR
+   code), and tap **Download binder-ca.crt**.
+3. Android doesn't install a certificate from the download itself. Open the phone's Settings → Security & privacy → More
+   security settings → Encryption & credentials → Install a certificate → CA certificate → Install anyway, and pick
+   `binder-ca.crt` from Downloads. On a Samsung: Settings → Security and privacy → More security settings → Install from
+   device storage → CA certificate. The names vary from maker to maker; searching Settings for "CA certificate" finds
+   it. Android asks for a screen lock (a PIN, pattern, or password) first if the phone has none.
+4. Check that it's Binder's: under Encryption & credentials → Trusted credentials → User, tap "Binder on <your PC's
+   name> (<the day it was made>)". Its SHA-256 fingerprint must be the one Settings → Phone access shows. If it isn't,
+   remove it: the download came over plain HTTP, which someone else on the Wi-Fi could have changed.
+5. Close Chrome fully, open it again, and tap **Continue to Binder** on the setup page. A phone paired over HTTP pairs
+   again there, with a new code from Pair a phone; if HTTPS is turned off later, phones paired over HTTPS pair again
+   too.
+
+The certificate can vouch only for addresses on home and office networks (10.x, 172.16–31.x, 192.168.x), for `.local`
+names and the computer's own name, and only for websites. So it can't be used to read the phone's traffic to any site
+on the internet; someone who copied its key could at most pose as another device on your own network, such as the
+router's page. While it's installed, Android says the network may be monitored: that's this certificate. Its key stays
+in the library's `lan` folder, private to your account, and backups and `pnpm move-library` don't copy it. It lasts 10
+years; the server certificate it signs for the computer's addresses is made again by itself (when an address changes,
+and before its 397 days end), which phones don't notice. If you think the key was copied, **Make a new certificate** in
+Settings → Phone access, then on each phone remove the old one (Trusted credentials → User → it → Remove) and install
+the new one from the setup page. Settings also says when Binder made a new one itself, because the old one's files were
+missing or damaged. Firefox for Android ignores certificates installed this way: use Chrome.
+
+**Binder as an app on the phone.** Over HTTPS, Chrome's ⋮ menu → **Add to Home screen** (or **Install app**) puts
+Binder on the home screen. It opens on Library, in its own window.
+
+**When the computer's address changes.** A phone is paired at the computer's address. If the router gives the computer
+another one, Binder's log says so, Settings shows the new address, and each phone pairs again there. A reservation for
+the computer in the router's settings (DHCP) keeps its address the same. A computer on several networks (Wi-Fi and
+Ethernet, a VPN, or virtual machines' adapters) gives phones its Wi-Fi address first; Settings → Phone access can choose
+another.
+
+**Ports.** Phones use port 4322, and 4323 for HTTPS. `BINDER_LAN_PORT` moves them (HTTPS on the next port up), as in
+`$env:BINDER_LAN_PORT=4422; pnpm start`, and `BINDER_LAN=0` keeps phone access off for that Binder, whatever Settings
+says. When Binder can't listen on a port, Settings says why.
 
 ## Searching
 
@@ -64,8 +218,10 @@ for either way round) to see what you have the most, or the fewest, copies of.
 
 **Import CSV** reads exports from Moxfield, Deckbox, ManaBox, Archidekt, TCGplayer, and Dragon Shield, or any CSV with
 Count and Name columns (add Edition and Collector Number to pin the printing; with those two, the name is optional). It shows how each row matched before
-anything is added, and it adds to your library rather than replacing it. **Export CSV** writes
-`Count,Name,Edition,Collector Number,Foil`, which Moxfield and most other apps can import.
+anything is added, and it adds to your library rather than replacing it. It reads a CSV as Excel saves it on Windows
+too: UTF-8, Unicode Text (UTF-16), or Windows' own encoding. **Export CSV** writes
+`Count,Name,Edition,Collector Number,Foil`, which Moxfield and most other apps can import. On Windows, **Export for
+Excel** writes the same file marked as UTF-8, so Excel shows names like Séance and Lim-Dûl's Vault as they are.
 
 ## Sets
 
@@ -117,9 +273,19 @@ for each seat (or **Nobody** for seat 2), who goes first, and starting life, or 
   card data has tokens has none; **Rematch** picks them up.
 - **Commander**: commanders start in the command zone, and their tax counts itself. A commander going to a graveyard,
   exile, a hand, or a library asks **Command zone instead?** Commander damage is entered in each seat's panel.
-- **Undo** (⌘Z) takes back anything, back to the mulligans. **Log** tells the game as the seat you're viewing would
-  know it. The game saves as you play: leave the page or quit Binder, and it's there when you come back. **End game**
-  offers a **Rematch** with the same decks or a **New game**.
+- **Undo** (⌘Z on a Mac, Ctrl+Z on Windows) takes back anything, back to the mulligans. **Log** tells the game as the
+  seat you're viewing would know it. The game saves as you play: leave the page or quit Binder, and it's there when you
+  come back (on your phone or tablet too: it's the same game). **End game** offers a **Rematch** with the same decks or
+  a **New game**.
+- **By touch** (a tablet, or a touch screen): a finger drags cards and draws a box to select. Tap a card in hand or the
+  command zone to play it, and a library to draw. Press and hold a card, a library, a stack item, or empty battlefield
+  (about half a second) for what a right-click opens, as a sheet along the bottom; a tap on a stack item, or on a card
+  in a graveyard or exile list, opens its menu too, and the library's ⋯ opens its own. **Select** in the turn bar makes
+  taps add cards to the selection or take them out, and **Clear** empties it; attaching has **Cancel**. **View card**
+  in a card's menu shows it large, as hovering does with a mouse. Back closes a menu, a dialog, or the card you're
+  viewing. Below a laptop's width, the turn bar's Log, Switch side, and End game are under its ⋯. On a phone, either
+  way up, Playtest says it needs a bigger screen and offers **Show the table anyway**; setup and the mulligans work
+  there.
 
 ## Brainstorm
 
@@ -173,21 +339,42 @@ Scanning needs Xcode's command line tools (`xcode-select --install`) to build th
 `native/ocr.swift`; the server rebuilds it when the source changes. `pnpm ocr:bench` measures recognition on about 70
 Scryfall card images, downloaded once into `data/bench`.
 
+## Scanning on Windows
+
+On a Windows PC, Scan works the same way with a camera over the scanning area. A USB webcam mounted over the mat,
+looking straight down, appears in the camera list once it's plugged in, and Binder picks it over a laptop's own camera
+(and remembers the one you choose). Or scan with your phone (Your phone). Binder reads each card with Windows' own text
+recognition, Windows OCR, through Windows PowerShell: on Windows 10 or 11 with English there's nothing to build or
+install, and scanning happens entirely on the PC. `pnpm run setup` says whether Windows OCR reads English here. If it
+doesn't, add English (United States) in Settings → Time & language → Language & region, or install only its text
+recognition, in PowerShell as administrator:
+
+```powershell
+Add-WindowsCapability -Online -Name 'Language.OCR~~~en-US~0.0.1.0'
+```
+
+A PC whose organization runs PowerShell under a device policy (Constrained Language mode) keeps Binder from Windows
+OCR, and each scan's error says so. How well Windows OCR reads cards is still to be measured: `pnpm ocr:bench` runs the
+same benchmark as on a Mac, and keeps what each engine read beside the images
+(`data\bench\<set>-<number>.windows-ocr.json`; a Mac's are `.apple-vision.json`), so the two can be compared.
+`pnpm ocr:bench --helper <file>` reads with another helper, such as a changed copy of `native\ocr.ps1`.
+
 ## Keyboard shortcuts
 
 `?` lists them. `/` finds a card. `g` then a letter goes to a page: `g l` Library, `g c` Scan, `g d` Decks,
 `g p` Playtest, `g s` Search, `g e` Sets, `g b` Brainstorm, `g t` Settings. On the Scan page, Space captures and `a`
 switches between Auto and Manual. On the Playtest page, `t` taps, `f` flips, `+` and `-` add or remove a +1/+1
-counter (on the card under the pointer, or the selection), `d` draws, Tab switches side, and ⌘Z undoes. None of them
-fire while a text field or dropdown has focus. (Space still captures on a focused dropdown, instead of opening it.)
+counter (on the card under the pointer, or the selection), `d` draws, Tab switches side, and ⌘Z undoes (Ctrl+Z on
+Windows). None of them fire while a text field or dropdown has focus. (Space still captures on a focused dropdown,
+instead of opening it.) In the Windows app, Ctrl+W closes the window and Ctrl+Q quits Binder.
 
 ## Development
 
 ```bash
 pnpm dev            # API on :4321 (auto-restarts) + Vite on http://localhost:5173
-pnpm app:dev        # Binder.app's window, run from the project on data/ (no packaging): its key is data/.env
+pnpm app:dev        # the desktop app's window, run from the project on data/ (no packaging): its key is data/.env
                     # (not the project's .env), and it writes data/Electron/ and data/Logs/
-pnpm app --no-install   # packages Binder.app into release/ without installing it
+pnpm app --no-install   # packages the desktop app into release/ (Binder.app, or win-unpacked\Binder.exe), no install
 pnpm test           # unit and integration tests
 pnpm typecheck
 ```
@@ -195,15 +382,39 @@ pnpm typecheck
 Card data refreshes automatically at startup when it's older than 7 days (or when a Binder update needs
 something new from it), or from Settings → Card data.
 Everything lives in `data/` (database, downloads, and backups in `data/backups`: a backup is written when Binder
-starts and the last one is over 24 hours old, and the newest 7 are kept).
+starts and the last one is over 24 hours old, and the newest 7 are kept). Phone access keeps its own files in
+`data/lan/` (the phones' secret and the HTTPS certificates, private to you), which backups leave out.
 Settings → Backups shows the last backup and the folder, and **Back up now** saves one on demand (once today's backup
 exists it saves an extra copy; the newest 3 extra copies are kept, apart from the daily 7).
 Before a Binder update changes the database's structure, it also saves `binder-YYYY-MM-DD-before-NNN.db` there (the
 newest 3 are kept); if it can't, it doesn't start, and the database is left as it was.
 To restore a backup, stop Binder and copy it over `data/binder.db` (Binder.app's is
-`~/Library/Application Support/Binder/binder.db`), deleting `binder.db-wal` and `binder.db-shm`. Set
-`BINDER_DATA_DIR` to use a different folder.
+`~/Library/Application Support/Binder/binder.db`, and Binder on Windows' `%LOCALAPPDATA%\Binder\binder.db`), deleting
+`binder.db-wal` and `binder.db-shm`. Set `BINDER_DATA_DIR` to use a different folder.
 Replacing card data leaves unused space inside `data/binder.db`; Settings → Library file shows how much (its size
-also counts the log beside the file), and **Compact the library** gives it back (after a backup).
-If port 4321 is taken (Binder may already be running, from a terminal or as Binder.app in the menu bar), start with
-`PORT=4322 pnpm start`.
+also counts the log beside the file; on Windows, sizes count as File Explorer counts them), and **Compact the
+library** gives it back (after a backup).
+If port 4321 is taken (Binder may already be running, from a terminal or as the desktop app), start with
+`PORT=4330 pnpm start` (in PowerShell, `$env:PORT=4330; pnpm start`). Ports 4322 and 4323 are the phones' (Your phone).
+
+On Windows:
+- `pnpm install` builds nothing: better-sqlite3 loads the prebuilt binary it comes with (`package.json` tells pnpm not
+  to build it), so no Visual Studio or Python is needed. `.gitattributes` keeps text files with LF line endings in every
+  checkout, and Windows' own scripts (`.ps1`, `.cmd`, `.bat`) with CRLF, which Windows PowerShell 5.1 expects.
+- `pnpm test` runs the same suite, plus a few tests of Windows' own: files made private to you (`icacls`), and the OCR
+  helper reading a card it draws, with Windows OCR. The OCR helper's self-test and protocol tests run in Windows
+  PowerShell there.
+- At start, Binder warns when the library is in OneDrive (which copies it while Binder writes it), on a network share,
+  or at a path long enough for Windows to refuse its files: set `BINDER_DATA_DIR` to a folder elsewhere. If Windows
+  refuses a port (it keeps some for Hyper-V, WSL, or Docker), `netsh interface ipv4 show excludedportrange
+  protocol=tcp` lists them; start with `$env:PORT` set to another.
+
+Windows' parts are checked on a Mac or Linux too. The OCR helper's self-test and protocol tests run in PowerShell 7
+(`pwsh`) when it's on the PATH, or in the PowerShell that `BINDER_TEST_POWERSHELL` names, and are skipped without one.
+On Linux, `VITEST_SIMULATE_WINDOWS_LOCKS=1 pnpm test` refuses, as Windows does, to delete or rename a database file
+that's open, so a test that cleans up before closing a database fails there as it would on Windows.
+
+A phone can use the dev server: Vite's proxy passes the phone's address on to Binder (`X-Forwarded-For`), so it's a
+phone there too, paired with the code as usual, and only while phone access is on. Vite listens only on this computer
+unless it's told otherwise: run the two halves yourself (`node --watch src/server/main.ts`, and
+`pnpm exec vite --host` beside it), and open `http://<address>:5173` on the phone.

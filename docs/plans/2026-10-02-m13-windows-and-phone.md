@@ -154,3 +154,42 @@ Every task: keeps the Mac's behavior; matches the code's comment style and densi
    address, QR code and code, devices, HTTPS and the certificate's install steps, Windows network hints); PC-only
    sections hidden on a phone; a revoked phone back to the pairing page.
 10. **The README, the spec, and the follow-ups,** with the owner's first-use checks on Windows and the phone.
+
+## In execution
+
+The tasks ran in the pairs above (1 and 2, 3 and 4, 5 and 6), each reviewed and given a fix commit, with these
+differences from the plan:
+- **Task 8 was built in two halves.** The certificate authority and Windows' network profile (`certs.ts`,
+  `network-profile.ts`) were built beside Task 7, as modules alone; the HTTPS listener, `/phone-setup`,
+  `/binder-ca.crt` and the tray's Phone access items were built beside Task 9, on Task 7's merged listener. The
+  authority's fix added limits the plan didn't name: extended key usage serverAuth alone, and email addresses and URIs
+  constrained to `invalid`, so its key can't sign mail a phone trusts.
+- **`LanStatus` grew** past the interface above: `pairingEnded` (Task 7, for the PC's dialog to say how pairing
+  ended), `caName` and `caReplaced` (Task 8, which Task 9's Settings shows: the authority's name, and that phones must
+  install a new one), and `LanDevice.https` (a phone pairs again when HTTPS is turned on or off). `url` is null unless
+  Binder listens, `httpsPort` is the real port while HTTPS listens, and with `BINDER_LAN=0` both ports read 0 and
+  `error` says why. `LanSummary`, with `available` for the tray's checkbox, moved to `src/shared/types.ts`. Until Task
+  8's second half, `PUT /api/lan {https: true}` was refused (400 `https_unavailable`). The last gaps between Tasks 8 and
+  9 were closed after both merged: a wrong code says how many tries are left, Settings asks for the status every 10 s
+  even while phone access is off (the tray can turn it on with Settings open), and Settings says when the authority
+  was replaced.
+- **Pairing**: 5 wrong codes stop one address, and 20 from anywhere close the window, rather than 5 in all, so one
+  device on the Wi-Fi can't keep the owner from pairing. A phone forgotten on its own stays forgotten in
+  `lan/forgotten`, so a restored backup can't let it back in. Pairing over HTTPS also forgets the phone's HTTP device
+  when its old cookie arrives.
+- **The gate**: a failed `GET /api/lan/me` shows the PC's view only at the computer's own address; a phone's page says
+  it's connecting and asks again, since the PC's view would show a phone the PC's parts.
+- **Playtest**: Task 6 first made a finger's tap open the card's menu, Play first; its fix made the tap play, as the
+  plan says. The "bigger screen" notice shows only where the pointer is a finger, and on a phone either way up (a screen
+  under 500 px tall), not only below tablet width.
+- **Scanning**: `OcrHelper.prepare` takes an optional log, so the Mac still logs "[scan] Built the OCR helper", and
+  `ocr-helper.ts` also exports `NO_OCR_HELPER`, `powershellCommand` and `checkWindowsOcr`. `ocr.ps1` reads requests from
+  `[Console]::In` (a raw stdin stream read nothing under PowerShell 7), and under Constrained Language mode answers once
+  and exits.
+- **The Windows app**: `pnpm app` asks a running Binder to quit before packaging (electron-builder starts by deleting
+  `release\win-unpacked`) instead of refusing, as the Mac's still does. `package.json` names an author, so Windows
+  doesn't list Electron's. The app also stops its server when Windows ends the session.
+- **Export for Excel** ended as a plain link to the server's `?excel=1` (Tasks 1 and 2 had each added the byte order
+  mark on their side), and the playtest's conflict messages say "or on another device" on the page as on the server.
+- Nothing ran on a Windows PC, an Android phone or a Mac. What each task couldn't check is in `m13-followups.md`, with
+  the owner's first-use checks.
