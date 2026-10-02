@@ -15,6 +15,7 @@ import {
   startingGuide,
 } from '../../lib/photo-capture.ts'
 import { IS_ANDROID, PLATFORM, type Platform, useCoarsePointer } from '../../lib/platform.ts'
+import { WindowOverlay } from '../WindowOverlay.tsx'
 import { CAPTURE_BUTTON, CaptureBar } from './CaptureBar.tsx'
 
 /** Where a photo came from: the camera app, or the photos already on the device. Retake opens the same again. */
@@ -165,20 +166,23 @@ function usePhotos(onCapture: (jpeg: Blob) => void) {
     input?.click()
   }
 
+  // Over the whole window, outside the page, which is inert behind it.
   const review = photo && (
-    <PhotoReview
-      key={photo.id}
-      photo={photo}
-      initial={startingGuide(photo.bitmap.width, photo.bitmap.height, last.current)}
-      making={making === photo.id}
-      error={error}
-      onUse={(guide) => void use(guide)}
-      onRetake={retake}
-      onCancel={() => {
-        show(null)
-        setError(null)
-      }}
-    />
+    <WindowOverlay>
+      <PhotoReview
+        key={photo.id}
+        photo={photo}
+        initial={startingGuide(photo.bitmap.width, photo.bitmap.height, last.current)}
+        making={making === photo.id}
+        error={error}
+        onUse={(guide) => void use(guide)}
+        onRetake={retake}
+        onCancel={() => {
+          show(null)
+          setError(null)
+        }}
+      />
+    </WindowOverlay>
   )
   return { pick, opening, error: photo ? null : error, review, cameraRef, libraryRef }
 }

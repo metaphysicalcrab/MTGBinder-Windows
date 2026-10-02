@@ -5,13 +5,22 @@ export class ApiRequestError extends Error {
   code: string
   /** For query errors: the character range of the query that's wrong. */
   span: { start: number; end: number } | undefined
-  constructor(status: number, code: string, message: string, span?: { start: number; end: number }) {
+  /** For a 429: the seconds to wait before trying again (its Retry-After header). */
+  retryAfter: number | undefined
+  constructor(status: number, code: string, message: string, span?: { start: number; end: number }, retryAfter?: number) {
     super(message)
     this.name = 'ApiRequestError'
     this.status = status
     this.code = code
     this.span = span
+    this.retryAfter = retryAfter
   }
+}
+
+/** A Retry-After header's seconds; undefined without one (or with a date, which the server never sends). */
+export function retryAfterSeconds(header: string | null): number | undefined {
+  const seconds = header === null || header.trim() === '' ? NaN : Number(header)
+  return Number.isFinite(seconds) && seconds >= 0 ? Math.ceil(seconds) : undefined
 }
 
 async function handle<T>(res: Response): Promise<T> {
@@ -28,7 +37,7 @@ async function handle<T>(res: Response): Promise<T> {
   } catch {
     // Not a JSON error body; keep the generic message.
   }
-  throw new ApiRequestError(res.status, code, message, span)
+  throw new ApiRequestError(res.status, code, message, span, retryAfterSeconds(res.headers.get('retry-after')))
 }
 
 /** GETs JSON from the API. Pass React Query's `signal` so superseded requests are cancelled. */

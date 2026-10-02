@@ -3,6 +3,7 @@ import { ChatView, type OpenWith } from '../components/brainstorm/ChatView.tsx'
 import { Composer } from '../components/brainstorm/Composer.tsx'
 import { ThreadList } from '../components/brainstorm/ThreadList.tsx'
 import { useCreateThread } from '../lib/brainstorm.ts'
+import { useOnPhone } from '../lib/client.ts'
 import { useAiKey } from '../lib/settings.ts'
 
 const EXAMPLES = [
@@ -11,8 +12,12 @@ const EXAMPLES = [
   'Which of my cards are worth building around?',
 ]
 
-/** A new conversation: a box to ask in, and a few examples. Asking starts the conversation. */
+/**
+ * A new conversation: a box to ask in, and a few examples. Asking starts the conversation. Without a key, where to add
+ * one: Settings here, or on a phone, Settings on the PC (only the PC sets the key).
+ */
 function Start({ configured }: { configured: boolean }) {
+  const phone = useOnPhone()
   const create = useCreateThread()
   const navigate = useNavigate()
   const start = (ask: string) =>
@@ -39,6 +44,11 @@ function Start({ configured }: { configured: boolean }) {
             ))}
           </div>
         </>
+      ) : phone ? (
+        <p className="rounded-lg border border-stone-800 bg-stone-900/60 p-4 text-stone-300">
+          Brainstorming uses Claude through Anthropic's API, with your own API key. Add a key in Settings on the PC running
+          Binder to start. Scanning never uses it.
+        </p>
       ) : (
         <p className="rounded-lg border border-stone-800 bg-stone-900/60 p-4 text-stone-300">
           Brainstorming uses Claude through Anthropic's API, with your own API key.{' '}
