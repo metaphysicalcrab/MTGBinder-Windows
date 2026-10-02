@@ -93,8 +93,9 @@ const phoneUrl = (lan: LanSummary | null) => (lan?.listening ? (lan.urls[0] ?? n
 
 /**
  * The tray icon's menu, the same on every platform: Open Binder; Phone access, a checkbox that turns it on or off, the
- * address phones open beneath it while Binder listens for them (or why it can't), and Phone access… for its settings;
- * then Quit Binder. The phone items wait for the server to be ready (`lan` is what it last said of phone access).
+ * address phones open beneath it while Binder listens for them (and why they can't use HTTPS, when it's on but failed),
+ * or why it can't listen, and Phone access… for its settings; then Quit Binder. The phone items wait for the server to
+ * be ready (`lan` is what it last said of phone access); the checkbox can't be clicked while BINDER_LAN=0 keeps it off.
  */
 export function trayMenuTemplate(
   state: { ready: boolean; lan: LanSummary | null },
@@ -103,16 +104,14 @@ export function trayMenuTemplate(
   const { ready, lan } = state
   const on = lan?.enabled ?? false
   const url = phoneUrl(lan)
-  const line = url
-    ? `Phones: ${url}`
-    : lan?.listening
-      ? "Phones: this PC isn't on a network a phone can reach"
-      : (lan?.error ?? null)
+  const where = url ? `Phones: ${url}` : "Phones: this PC isn't on a network a phone can reach"
+  const lines = [...(lan?.listening ? [where] : []), ...(lan?.error ? [lan.error] : [])]
+  const available = ready && lan?.available !== false
   return [
     { label: 'Open Binder', click: actions.open },
     { type: 'separator' },
-    { label: 'Phone access', type: 'checkbox', checked: on, enabled: ready, click: () => actions.phoneAccess(!on) },
-    ...(ready && line ? [{ label: line, enabled: false }] : []),
+    { label: 'Phone access', type: 'checkbox', checked: on, enabled: available, click: () => actions.phoneAccess(!on) },
+    ...(ready ? lines.map((label) => ({ label, enabled: false })) : []),
     { label: 'Phone access…', enabled: ready, click: actions.phoneSettings },
     { type: 'separator' },
     { label: 'Quit Binder', click: actions.quit },

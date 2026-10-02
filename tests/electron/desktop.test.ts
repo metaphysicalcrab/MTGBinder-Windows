@@ -179,8 +179,14 @@ describe('the desktop app on each platform', () => {
 
   describe("the tray icon's menu", () => {
     const actions = () => ({ open: vi.fn(), phoneAccess: vi.fn(), phoneSettings: vi.fn(), quit: vi.fn() })
-    const off = { enabled: false, listening: false, urls: [], error: null }
-    const on = { enabled: true, listening: true, urls: ['http://192.168.1.5:4322', 'http://172.20.0.1:4322'], error: null }
+    const off = { enabled: false, available: true, listening: false, urls: [], error: null }
+    const on = {
+      enabled: true,
+      available: true,
+      listening: true,
+      urls: ['http://192.168.1.5:4322', 'http://172.20.0.1:4322'],
+      error: null,
+    }
 
     it('keeps Open Binder and Quit Binder, with Phone access between them once the server is ready', () => {
       const starting = trayMenuTemplate({ ready: false, lan: null }, actions())
@@ -223,6 +229,28 @@ describe('the desktop app on each platform', () => {
       expect(trayToolTip({ ...off, enabled: true, error: failure })).toBe('Binder')
       const nowhere = trayMenuTemplate({ ready: true, lan: { ...on, urls: [] } }, actions())
       expect(nowhere[3]).toEqual({ label: "Phones: this PC isn't on a network a phone can reach", enabled: false })
+    })
+
+    it("says why phones can't use HTTPS while they open Binder over HTTP meanwhile", () => {
+      const failure = "Couldn't listen on port 4323 for HTTPS: another program is using it. Set BINDER_LAN_PORT to use another port"
+      const http = trayMenuTemplate({ ready: true, lan: { ...on, error: failure } }, actions())
+      expect(shape(http.slice(2, 6))).toEqual([
+        { label: 'Phone access', type: 'checkbox', checked: true, enabled: true, click: true },
+        { label: 'Phones: http://192.168.1.5:4322', enabled: false },
+        { label: failure, enabled: false },
+        { label: 'Phone access…', enabled: true, click: true },
+      ])
+    })
+
+    it("can't turn phone access on when BINDER_LAN=0 keeps it off, and says why", () => {
+      const off = 'Phone access is off for this Binder: it was started with BINDER_LAN=0'
+      const lan = { enabled: false, available: false, listening: false, urls: [], error: off }
+      const menu = trayMenuTemplate({ ready: true, lan }, actions())
+      expect(shape(menu.slice(2, 5))).toEqual([
+        { label: 'Phone access', type: 'checkbox', checked: false, enabled: false, click: true },
+        { label: off, enabled: false },
+        { label: 'Phone access…', enabled: true, click: true },
+      ])
     })
   })
 

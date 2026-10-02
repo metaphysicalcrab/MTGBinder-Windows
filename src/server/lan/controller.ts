@@ -5,7 +5,7 @@ import { getMeta, setMeta } from '../db/meta.ts'
 import { ApiError } from '../http.ts'
 import type { RunTool } from '../owner-only.ts'
 import { createAddressBook, type AddressBook, type Interfaces } from './addresses.ts'
-import { ensureCertificates, rotateAuthority, type AuthorityInfo, type LanCertificates } from './certs.ts'
+import { ensureCertificates, readAuthority, rotateAuthority, type AuthorityInfo, type LanCertificates } from './certs.ts'
 import { createDeviceStore, type DeviceStore } from './devices.ts'
 import { createLanListener, type ListenerFetch } from './listener.ts'
 import { windowsNetworkProfile, type NetworkProfile } from './network-profile.ts'
@@ -163,6 +163,11 @@ export function createLanController(options: LanOptions): LanController {
   let certificates: LanCertificates | null = null
   /** Why they couldn't be made, until they are. */
   let certificateError: string | null = null
+  /**
+   * The authority in `dir`, as last read for the status while this run has made no certificates (authority()): read
+   * once, and again after certify() may have changed the files.
+   */
+  let stored: { authority: AuthorityInfo | null } | null = null
   /** When they were last checked, and made again if due. */
   let checkedAt = 0
   /** Whether this Binder replaced the authority phones had installed. */
@@ -236,7 +241,7 @@ export function createLanController(options: LanOptions): LanController {
       now: new Date(now()),
       platform: options.platform,
       run: options.run,
-    })
+    }).finally(() => (stored = null)) // made or not, the files may have changed: the status reads them again
     certificates = made
     certificateError = null
     if (made.reissued) secure.setCertificate(made)
@@ -249,6 +254,21 @@ export function createLanController(options: LanOptions): LanController {
         )
       }
     }
+  }
+
+  /**
+   * The authority phones install: the one this run made or checked, else the one in `dir` from before (phone access is
+   * off, or HTTPS hasn't started), so the status says the same either way; null when there's none that's usable, or its
+   * files can't be read just now.
+   */
+  function authority(): AuthorityInfo | null {
+    if (certificates) return certificates
+    try {
+      stored ??= { authority: readAuthority(options.dir, new Date(now())) }
+    } catch {
+      return null // another program has its files open: read them next time
+    }
+    return stored.authority
   }
 
   /** certify() in the background: a failure is logged, and the certificate served until then kept. */
@@ -334,7 +354,7 @@ export function createLanController(options: LanOptions): LanController {
     status() {
       const port = listener.port
       const on = httpsOn()
-      const authority = on ? certificates : null
+      const ca = on ? authority() : null
       readNetwork() // for next time: the first read on Windows takes a second or two
       const interfaceName = chosen()?.interface
       return {
@@ -348,8 +368,8 @@ export function createLanController(options: LanOptions): LanController {
         address: getMeta(db, 'lan_address'),
         url: controller.url(),
         setupUrl: setupUrl(),
-        caFingerprint: authority?.caFingerprint ?? null,
-        caName: authority?.caName ?? null,
+        caFingerprint: ca?.caFingerprint ?? null,
+        caName: ca?.caName ?? null,
         caReplaced: on && replaced,
         pairing: pairing.current(),
         pairingEnded: pairing.ended(),
@@ -362,6 +382,7 @@ export function createLanController(options: LanOptions): LanController {
       const others = addresses.list().map((a) => urlAt(a.address))
       return {
         enabled: enabled(),
+        available: !off,
         listening: listener.listening,
         urls: url ? [url, ...others.filter((other) => other !== url)] : [],
         error: off ? OFF : (listener.error ?? httpsError()),

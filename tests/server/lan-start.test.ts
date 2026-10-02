@@ -55,7 +55,7 @@ describe("the phones' listener (spec §5.10)", () => {
   it('starts and stops while Binder runs, serving the same app by the phones\' rules', async () => {
     const options = library()
     const binder = await runBinder(options)
-    expect(binder.lan).toEqual({ enabled: false, listening: false, urls: [], error: null })
+    expect(binder.lan).toEqual({ enabled: false, available: true, listening: false, urls: [], error: null })
     const on = await phoneAccess(binder, true)
     expect(on).toMatchObject({ enabled: true, listening: true, error: null })
     expect(binder.lan).toMatchObject({ enabled: true, listening: true, error: null })
@@ -105,7 +105,7 @@ describe("the phones' listener (spec §5.10)", () => {
     const binder = await runBinder(options)
     const failure = `Couldn't listen on port ${port}: another program is using it. Set BINDER_LAN_PORT to use another port`
     expect(options.lines).toContain(`[phone] ${failure}`)
-    expect(binder.lan).toEqual({ enabled: true, listening: false, urls: [], error: failure })
+    expect(binder.lan).toEqual({ enabled: true, available: true, listening: false, urls: [], error: failure })
     expect(options.changes.at(-1)).toEqual(binder.lan)
     expect((await fetch(`${binder.url}/api/health`)).status).toBe(200)
     const status = (await (await fetch(`${binder.url}/api/lan`)).json()) as LanStatus
@@ -141,7 +141,7 @@ describe("the phones' listener (spec §5.10)", () => {
     expect((await app.lan.update({ enabled: true })).error).toMatch(/^Couldn't listen on port \d+: another program/)
     const off = await app.lan.update({ enabled: false })
     expect([off.enabled, off.listening, off.error]).toEqual([false, false, null])
-    expect(changes.at(-1)).toEqual({ enabled: false, listening: false, urls: [], error: null })
+    expect(changes.at(-1)).toEqual({ enabled: false, available: true, listening: false, urls: [], error: null })
     expect(app.lines.at(-1)).toBe('[phone] Phone access is off')
     // Turning it off again changes nothing, and says nothing.
     await app.lan.update({ enabled: false })
@@ -174,7 +174,7 @@ describe("the phones' listener (spec §5.10)", () => {
     setMeta(db, 'lan_enabled', '1')
     db.close()
     const binder = await runBinder(options)
-    expect(binder.lan).toMatchObject({ enabled: false, listening: false })
+    expect(binder.lan).toMatchObject({ enabled: false, available: false, listening: false })
     expect(options.lines.some((line) => line.startsWith('[phone]'))).toBe(false)
   })
 })

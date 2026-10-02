@@ -197,6 +197,31 @@ describe('phone access over HTTPS (spec §5.10)', () => {
     )
   })
 
+  it('names the authority phones installed while phone access is off, after a restart too', async () => {
+    const app = makeLanApp()
+    const on = await withHttps(app)
+    const off = await app.lan.update({ enabled: false })
+    expect(off).toMatchObject({ enabled: false, https: true, caFingerprint: on.caFingerprint, caName: on.caName })
+    // Started again with phone access off: nothing has made or checked it this time, and the same is said.
+    const restarted = makeLanApp({}, { dir: app.dir })
+    setMeta(restarted.db, 'lan_https', '1')
+    expect(restarted.lan.status()).toMatchObject({
+      enabled: false,
+      https: true,
+      caFingerprint: on.caFingerprint,
+      caName: on.caName,
+    })
+    // A new one, made while it's off, is named from then on.
+    const rotated = await restarted.lan.rotate()
+    expect(rotated.caFingerprint).not.toBe(on.caFingerprint)
+    const installed = new crypto.X509Certificate(fs.readFileSync(path.join(app.dir, 'ca.pem')))
+    expect(rotated.caFingerprint).toBe(installed.fingerprint256)
+    // None made yet: none to name.
+    const fresh = makeLanApp()
+    setMeta(fresh.db, 'lan_https', '1')
+    expect(fresh.lan.status()).toMatchObject({ https: true, caFingerprint: null, caName: null })
+  })
+
   it('makes a new authority when rotated, served at once, and says phones must install it again', async () => {
     const app = makeLanApp()
     const before = await withHttps(app)

@@ -644,9 +644,15 @@ export interface LanStatus {
   url: string | null
   /** `http://<address>:4322/phone-setup` when HTTPS is on, for installing the certificate. */
   setupUrl: string | null
-  /** The SHA-256 fingerprint of Binder's certificate authority ("AB:CD:…") when HTTPS is on. */
+  /**
+   * The SHA-256 fingerprint of Binder's certificate authority ("AB:CD:…") when HTTPS is on and the authority has been
+   * made, while phone access is off too (the one in the library's `lan/` folder, which phones installed); else null.
+   */
   caFingerprint: string | null
-  /** Its name, which Android lists it by under Trusted credentials → User: "Binder on DESKTOP-ABC1 (2026-10-02)". */
+  /**
+   * Its name, which Android lists it by under Trusted credentials → User: "Binder on DESKTOP-ABC1 (2026-10-02)". Null
+   * when `caFingerprint` is.
+   */
   caName: string | null
   /**
    * Binder made a new certificate authority while it ran (rotated, or the old one's files were missing, damaged or near
@@ -667,6 +673,8 @@ export interface LanStatus {
 /** Phone access as the terminal and the desktop app's tray show it: where phones open Binder, or why they can't. */
 export interface LanSummary {
   enabled: boolean
+  /** False when BINDER_LAN=0 keeps phone access off for this Binder, so nothing turns it on (`error` says so). */
+  available: boolean
   listening: boolean
   /** The addresses phones open (the chosen one first), https://… when HTTPS is on, while Binder listens for them. */
   urls: string[]

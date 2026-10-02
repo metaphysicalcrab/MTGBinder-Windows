@@ -12,6 +12,7 @@ import {
   readAuthority,
   rotateAuthority,
   type CertificateOptions,
+  type RunToolAsync,
 } from '../../src/server/lan/certs.ts'
 import type { RunTool } from '../../src/server/owner-only.ts'
 import { expectOwnerOnly } from '../helpers/private.ts'
@@ -461,6 +462,33 @@ describe('certificates for phone access over HTTPS (lan/certs)', () => {
     expect(error).toHaveBeenCalledWith(
       expect.stringMatching(/^\[phone\] Couldn't make .*ca-key\.pem\..* private to this user: icacls failed$/),
     )
+    expectWholeChain(rotated)
+    expect(fs.readdirSync(o.dir).sort()).toEqual(FILES)
+  })
+
+  it('on Windows, asks who the user is once, and waits for its tools and for files held open, as Binder goes on', async () => {
+    const o = options({ platform: 'win32' })
+    // Windows' tools answering later, as they do when run without blocking.
+    const user = '"desktop-abc1\\me","S-1-5-21-1-2-3-1001"\r\n'
+    const run = vi.fn<RunToolAsync>(async (command) => (command.endsWith('whoami.exe') ? user : ''))
+    await ensureCertificates({ ...o, run })
+    await ensureCertificates({ ...o, addresses: ['192.168.1.7'], run })
+    const runs = (tool: string) => run.mock.calls.filter(([command]) => path.win32.basename(command) === tool).length
+    expect([runs('whoami.exe'), runs('icacls.exe')]).toEqual([1, 6])
+
+    // Antivirus scanning a file just written: it's renamed into place once let go, and Binder serves meanwhile.
+    const rename = fs.promises.rename
+    const order: string[] = []
+    const held = vi.spyOn(fs.promises, 'rename').mockImplementation(async (from, to) => {
+      if (order.length > 0) return rename(from, to)
+      order.push('held')
+      setTimeout(() => order.push('Binder went on'), 0)
+      throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' })
+    })
+    onTestFinished(() => held.mockRestore())
+    const rotated = await rotateAuthority({ ...o, run })
+    expect(order).toEqual(['held', 'Binder went on'])
+    expect(held).toHaveBeenCalledTimes(5)
     expectWholeChain(rotated)
     expect(fs.readdirSync(o.dir).sort()).toEqual(FILES)
   })
