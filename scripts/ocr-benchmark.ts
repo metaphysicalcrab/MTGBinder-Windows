@@ -3,14 +3,22 @@
 // thresholds (src/server/scanner/matcher.ts). Images are kept in <data>/bench, so later runs don't download again.
 // Scryfall's image of a printing that comes in nonfoil shows the nonfoil card, so only a foil-only printing (whose
 // collector line prints the foil ★) should read as foil; each card read as foil is listed with its finishes.
+//
+// It reads with this computer's helper (Apple Vision on a Mac, Windows OCR on Windows), or with `--helper <file>`: a
+// program that speaks the helper's protocol, or a PowerShell script run as native/ocr.ps1 is (a changed copy of it, to
+// compare). What each engine read is kept beside the images as <set>-<number>.<engine>.json, a line of the file for each
+// line of text, so two engines' readings can be compared with a diff.
 import fs from 'node:fs'
 import path from 'node:path'
-import { BACKUP_DIR, BENCH_DIR, DB_PATH, OCR_BINARY, OCR_SOURCE } from '../src/server/config.ts'
+import { parseArgs } from 'node:util'
+import { BACKUP_DIR, BENCH_DIR, DB_PATH, ROOT_DIR } from '../src/server/config.ts'
 import { ensureCardNamesCurrent } from '../src/server/cards/repo.ts'
 import { openLibrary } from '../src/server/db/index.ts'
 import { createCardLookups } from '../src/server/scanner/lookups.ts'
 import { COLLECTOR_BAND, decide, readCard } from '../src/server/scanner/matcher.ts'
-import { buildOcrHelper, createOcrClient, type OcrResult } from '../src/server/scanner/ocr-client.ts'
+import { createOcrClient, type OcrResult } from '../src/server/scanner/ocr-client.ts'
+import { NO_OCR_HELPER, type OcrHelper, ocrHelper, powershellCommand } from '../src/server/scanner/ocr-helper.ts'
+import { trustSystemCertificates } from '../src/server/system-ca.ts'
 
 const BENCH: ReadonlyArray<[era: string, set: string, number: string]> = [
   ['1993 frame', 'lea', '57'], ['1993 frame', 'lea', '156'], ['1993 frame', '4ed', '72'], ['1993 frame', '4ed', '199'],
@@ -39,12 +47,38 @@ const BENCH: ReadonlyArray<[era: string, set: string, number: string]> = [
 type Outcome = 'right' | 'wrong printing' | 'wrong card' | 'printing?' | 'printing? wrong card' | 'unsure' | 'error'
 const OUTCOMES: Outcome[] = ['right', 'wrong printing', 'wrong card', 'printing?', 'printing? wrong card', 'unsure', 'error']
 
+/** The helper `--helper` names, or this computer's. */
+function chosenHelper(file: string | undefined): OcrHelper {
+  if (file === undefined) return ocrHelper({ platform: process.platform, appRoot: ROOT_DIR, buildFromSource: true })
+  const full = path.resolve(file)
+  const command = path.extname(full).toLowerCase() === '.ps1' ? powershellCommand(full) : [full]
+  return { command, engine: path.basename(full) }
+}
+
+const helper = chosenHelper(parseArgs({ options: { helper: { type: 'string' } } }).values.helper)
+if (helper.command === null) {
+  console.error(NO_OCR_HELPER)
+  process.exit(1)
+}
+/** The engine's name in file names: "Windows OCR" → windows-ocr. */
+const engineKey = helper.engine.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+console.log(`Reading with ${helper.engine}`)
+
 // It opens the owner's library (unless BINDER_DATA_DIR says otherwise), so it backs it up before upgrading it too.
 const db = openLibrary(DB_PATH, BACKUP_DIR)
 ensureCardNamesCurrent(db)
 fs.mkdirSync(BENCH_DIR, { recursive: true })
 const lookups = createCardLookups(db)
-const ocr = createOcrClient({ command: [OCR_BINARY], prepare: async () => void (await buildOcrHelper(OCR_SOURCE, OCR_BINARY)) })
+const ocr = createOcrClient({ command: helper.command, prepare: helper.prepare && (() => helper.prepare!(console.log)) })
+// On Windows, the certificates antivirus that checks HTTPS adds, without which Scryfall's images would fail to download.
+trustSystemCertificates()
+
+/** What the engine read, as JSON with a line of the file for each line of text, to diff against another engine's. */
+function saveReading(key: string, result: OcrResult) {
+  const lines = result.lines.map((line) => `  ${JSON.stringify(line)}`).join(',\n')
+  const text = `{"width":${result.width},"height":${result.height},"lines":[\n${lines}\n]}\n`
+  fs.writeFileSync(path.join(BENCH_DIR, `${key}.${engineKey}.json`), text)
+}
 
 /** The raw text of the lines in the collector band (the bottom of the card's text), as readCard measures it. */
 function collectorLines(result: OcrResult): string[] {
@@ -57,6 +91,8 @@ function collectorLines(result: OcrResult): string[] {
 const results: Array<{ era: string; key: string; outcome: Outcome; detail: string; ms: number }> = []
 /** Cards whose reading says foil, with the finishes their printing comes in and their raw collector lines. */
 const foils: Array<{ key: string; name: string; finishes: string; lines: string[] }> = []
+/** Whether the helper has started; its first image waits for that untimed (Windows PowerShell takes seconds). */
+let warm = false
 for (const [era, set, number] of BENCH) {
   const key = `${set}-${number}`
   const card = db
@@ -73,11 +109,16 @@ for (const [era, set, number] of BENCH) {
     fs.writeFileSync(file, Buffer.from(await res.arrayBuffer()))
     await new Promise((r) => setTimeout(r, 100)) // Scryfall asks for at least 50–100 ms between requests
   }
+  if (!warm) {
+    warm = true
+    await ocr.recognize(file).catch(() => {}) // the timed reading says why, if it fails
+  }
   const started = performance.now()
   try {
     const ocrResult = await ocr.recognize(file)
     const decision = decide(readCard(ocrResult), lookups)
     const ms = performance.now() - started
+    saveReading(key, ocrResult)
     const { outcome: o, card: found, reading } = decision
     const sameCard = found?.oracleId === card.oracle_id
     const outcome: Outcome =
@@ -102,7 +143,12 @@ for (const era of [...eras, 'all']) {
   console.log(`${era.padEnd(22)}${pad(rows.length, 6)}${counts.join('')}`)
 }
 const ms = results.map((r) => r.ms).sort((a, b) => a - b)
-console.log(`\nOCR + match: median ${ms[Math.floor(ms.length / 2)]!.toFixed(0)} ms, slowest ${ms.at(-1)!.toFixed(0)} ms`)
+if (ms.length === 0) {
+  console.log('\nNo cards were read: import the card data first (pnpm run setup).')
+} else {
+  console.log(`\nOCR + match: median ${ms[Math.floor(ms.length / 2)]!.toFixed(0)} ms, slowest ${ms.at(-1)!.toFixed(0)} ms`)
+  console.log(`What ${helper.engine} read is in ${BENCH_DIR}, as <set>-<number>.${engineKey}.json.`)
+}
 console.log(`\nRead as foil: ${foils.length === 0 ? 'none' : foils.map((f) => f.key).join(', ')}`)
 for (const f of foils) {
   console.log(`  ${f.key} ${f.name} (finishes ${f.finishes}): ${f.lines.map((l) => JSON.stringify(l)).join(' | ')}`)

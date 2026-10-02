@@ -1,6 +1,7 @@
 // Binder's server inside Binder.app, in its own process (Electron's utility process), so the window and the menu-bar
 // icon stay responsive while the library does slow work (a backup before an upgrade, compacting, a card data refresh).
 // main.ts starts it with the paths as JSON; it answers with messages (ServerMessage) and stops when told to.
+import { ocrHelper } from '../src/server/scanner/ocr-helper.ts'
 import { type RunningBinder, startBinder, StartupError } from '../src/server/start.ts'
 import type { AppPaths } from './paths.ts'
 
@@ -28,8 +29,8 @@ startBinder({
   dataDir: paths.dataDir,
   envPath: paths.envPath,
   webDistDir: paths.webDistDir,
-  ocrBinary: paths.ocrBinary,
-  ocrSource: paths.ocrSource,
+  // Run from the project, the Mac's helper is built from its source; Binder.app ships it built.
+  ocr: ocrHelper({ platform: process.platform, appRoot: paths.appRoot, buildFromSource: !paths.packaged }),
   port: paths.port,
   log: (line) => post({ type: 'log', line }),
   onUpgradeBackup: () => post({ type: 'upgrading' }),

@@ -15,9 +15,10 @@ export interface AppPaths {
   /** The server's log, one file per run. */
   logDir: string
   webDistDir: string
-  ocrBinary: string
-  /** The helper's Swift source, to build it from; none in the packaged app, which ships it built. */
-  ocrSource?: string
+  /** Binder's own files (the app's, or the project's), where the server finds its OCR helper (ocrHelper). */
+  appRoot: string
+  /** Whether it's the packaged app, whose OCR helper comes built; run from the project, the Mac's is built there. */
+  packaged: boolean
   port: number
 }
 
@@ -41,8 +42,8 @@ export function appPaths(input: { appData: string; appRoot: string; packaged: bo
     electronDir: path.join(dataDir, 'Electron'),
     logDir: path.join(dataDir, 'Logs'),
     webDistDir: path.join(appRoot, 'dist', 'web'),
-    ocrBinary: path.join(appRoot, 'bin', 'ocr'),
-    ...(packaged ? {} : { ocrSource: path.join(appRoot, 'native', 'ocr.swift') }),
+    appRoot,
+    packaged,
     port: env.PORT === undefined ? APP_PORT : Number(env.PORT),
   }
 }

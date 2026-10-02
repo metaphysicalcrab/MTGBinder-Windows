@@ -5,7 +5,9 @@ import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
 import { describe, expect, it, onTestFinished } from 'vitest'
 import { migrate } from '../../src/server/db/migrate.ts'
+import type { OcrHelper } from '../../src/server/scanner/ocr-helper.ts'
 import { type BinderOptions, type RunningBinder, startBinder, StartupError } from '../../src/server/start.ts'
+import type { ScanItem } from '../../src/shared/types.ts'
 import { stubScryfall } from '../helpers/app.ts'
 import { tempDir } from '../helpers/tmp.ts'
 
@@ -13,7 +15,7 @@ import { tempDir } from '../helpers/tmp.ts'
  * A throwaway library folder with a built web app in it; removed when the test ends, after every Binder started on it
  * (with runBinder) has stopped.
  */
-function library(): Pick<BinderOptions, 'dataDir' | 'envPath' | 'webDistDir' | 'ocrBinary' | 'scryfall' | 'log'> & { lines: string[] } {
+function library(): Pick<BinderOptions, 'dataDir' | 'envPath' | 'webDistDir' | 'ocr' | 'scryfall' | 'log'> & { lines: string[] } {
   const dir = tempDir('binder-start-')
   const web = path.join(dir, 'web')
   fs.mkdirSync(web)
@@ -23,7 +25,7 @@ function library(): Pick<BinderOptions, 'dataDir' | 'envPath' | 'webDistDir' | '
     dataDir: path.join(dir, 'library'),
     envPath: path.join(dir, 'library', '.env'),
     webDistDir: web,
-    ocrBinary: path.join(dir, 'no-ocr-helper'),
+    ocr: { command: [path.join(dir, 'no-ocr-helper')], engine: 'none' },
     // Card data is never imported in these tests: the refresh a new library starts fails without reaching Scryfall.
     scryfall: stubScryfall(),
     log: (line) => lines.push(line),
@@ -120,6 +122,36 @@ describe('startBinder (spec §6)', () => {
     const again = await runBinder({ ...options, port })
     await again.stop()
   })
+
+  it('gets the OCR helper ready once, before the first scan, says what that took, and reads scans with it', async () => {
+    const options = library()
+    let prepared = 0
+    const ocr: OcrHelper = {
+      command: [process.execPath, fileURLToPath(new URL('../helpers/fake-ocr.ts', import.meta.url))],
+      prepare: async (log) => {
+        prepared++
+        log?.('Built the OCR helper')
+      },
+      engine: 'fake',
+    }
+    const binder = await runBinder({ ...options, ocr, port: await freePort() })
+    expect(prepared).toBe(0)
+    const capture = () =>
+      fetch(`${binder.url}/api/scan`, {
+        method: 'POST',
+        headers: { 'content-type': 'image/jpeg' },
+        body: new Uint8Array([0xff, 0xd8, 0xff, 0xe0]),
+      })
+    expect([(await capture()).status, (await capture()).status]).toEqual([201, 201])
+    // The fake helper reads "<pid>:<path>", which names no card: both scans wait for review, read without an error.
+    const read = async () => {
+      const { items } = (await (await fetch(`${binder.url}/api/scan/items`)).json()) as { items: ScanItem[] }
+      return items.map((item) => [item.status, item.error])
+    }
+    await expect.poll(read, { timeout: 10_000 }).toEqual([['review', null], ['review', null]])
+    expect(prepared).toBe(1)
+    expect(options.lines.filter((line) => line.startsWith('[scan]'))).toEqual(['[scan] Built the OCR helper'])
+  }, 20_000)
 
   it('says when it backs up the library before a migration upgrades it', async () => {
     const options = library()

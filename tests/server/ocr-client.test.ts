@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, onTestFinished } from 'vitest'
-import { buildOcrHelper, createOcrClient, type OcrClient } from '../../src/server/scanner/ocr-client.ts'
+import { asciiJson, buildOcrHelper, createOcrClient, type OcrClient } from '../../src/server/scanner/ocr-client.ts'
 
 // A file path, not the URL's (which is `/C:/…` on Windows, with any space in it as %20).
 const FAKE = [process.execPath, fileURLToPath(new URL('../helpers/fake-ocr.ts', import.meta.url))]
@@ -100,6 +100,60 @@ describe('createOcrClient', () => {
   it("fails requests when the helper can't start", async () => {
     client = createOcrClient({ command: ['/nonexistent/binder-ocr'] })
     await expect(client.recognize('one')).rejects.toThrow(/The OCR helper stopped \(spawn .*ENOENT/)
+  })
+
+  it('fails every image with the reason when this computer has no helper, starting nothing', async () => {
+    client = createOcrClient({ command: null, prepare: () => Promise.reject(new Error('No helper here')) })
+    await expect(client.recognize('one')).rejects.toThrow('No helper here')
+    await expect(client.recognize('two')).rejects.toThrow('No helper here')
+    client = createOcrClient({ command: null })
+    await expect(client.recognize('one')).rejects.toThrow('This computer has no OCR helper')
+  })
+
+  // Windows' tools can start a line with a byte order mark and end it with CRLF.
+  it('reads an answer after a byte order mark or a blank line, or ending in CRLF', async () => {
+    client = createOcrClient({ command: FAKE, timeoutMs: 2000 })
+    expect(await text(client, 'bom')).toMatch(/:bom$/)
+    expect(await text(client, 'crlf')).toMatch(/:crlf$/)
+  })
+
+  it("ignores a line with no id, as a helper saying it's ready would write", async () => {
+    client = createOcrClient({ command: [...FAKE, '--ready'], timeoutMs: 2000 })
+    expect(await text(client, 'one')).toMatch(/:one$/)
+  })
+
+  it('sends a path with letters outside ASCII as ASCII, which comes back whole', async () => {
+    client = createOcrClient({ command: FAKE, timeoutMs: 2000 })
+    const file = 'C:\\Users\\Zoë\\AppData\\Local\\Binder\\scans\\12 ★.jpg'
+    expect((await text(client, file)).split(':').slice(1).join(':')).toBe(file)
+  })
+
+  it("fails an image whose answer isn't one the matcher can use, and keeps the helper", async () => {
+    client = createOcrClient({ command: FAKE, timeoutMs: 2000 })
+    const before = pid(await text(client, 'one'))
+    await expect(client.recognize('malformed')).rejects.toThrow('The OCR helper answered something unexpected')
+    await expect(client.recognize('infinite')).rejects.toThrow('The OCR helper answered something unexpected')
+    expect(pid(await text(client, 'two'))).toBe(before)
+  })
+
+  it('says what the helper printed that was no answer when it gives up on an image', async () => {
+    client = createOcrClient({ command: FAKE, timeoutMs: 2000, startupTimeoutMs: 2000 })
+    await expect(client.recognize('noise')).rejects.toThrow('OCR took longer than 2 s: WARNING: this is not JSON')
+  }, 10_000)
+
+  it("gives a helper's first image longer, for the helper's start, and the images after it the usual time", async () => {
+    client = createOcrClient({ command: [...FAKE, '--start-delay=1500'], timeoutMs: 1000, startupTimeoutMs: 5000 })
+    expect(await text(client, 'one')).toMatch(/:one$/)
+    await expect(client.recognize('delay:1500:two')).rejects.toThrow('OCR took longer than 1 s')
+  }, 15_000)
+})
+
+describe('asciiJson', () => {
+  it('writes everything past 0x7E as \\u escapes, which JSON reads back', () => {
+    const value = { id: '1', path: 'C:\\Users\\Zoë\\★ 😀\u007f.jpg' }
+    const line = asciiJson(value)
+    expect(line).toBe('{"id":"1","path":"C:\\\\Users\\\\Zo\\u00eb\\\\\\u2605 \\ud83d\\ude00\\u007f.jpg"}')
+    expect(JSON.parse(line)).toEqual(value)
   })
 })
 

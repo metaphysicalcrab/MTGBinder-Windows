@@ -1,4 +1,5 @@
-import { APP_LIBRARY_DIR, DATA_DIR, ENV_PATH, HOST, OCR_BINARY, OCR_SOURCE, PORT, WEB_DIST_DIR } from './config.ts'
+import { APP_LIBRARY_DIR, DATA_DIR, ENV_PATH, HOST, PORT, ROOT_DIR, WEB_DIST_DIR } from './config.ts'
+import { ocrHelper } from './scanner/ocr-helper.ts'
 import { type RunningBinder, startBinder, StartupError } from './start.ts'
 import { appLibraryNote, portProblem, stopOnSignals } from './startup.ts'
 
@@ -20,8 +21,7 @@ try {
     dataDir: DATA_DIR,
     envPath: ENV_PATH,
     webDistDir: WEB_DIST_DIR,
-    ocrBinary: OCR_BINARY,
-    ocrSource: OCR_SOURCE,
+    ocr: ocrHelper({ platform: process.platform, appRoot: ROOT_DIR, buildFromSource: true }),
     port: PORT,
     host: HOST,
   })

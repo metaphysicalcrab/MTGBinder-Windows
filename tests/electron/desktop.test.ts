@@ -17,14 +17,15 @@ describe('appPaths (spec §3.4)', () => {
       electronDir: `${appData}/Binder/Electron`,
       logDir: `${appData}/Binder/Logs`,
       webDistDir: '/Applications/Binder.app/Contents/Resources/app/dist/web',
-      ocrBinary: '/Applications/Binder.app/Contents/Resources/app/bin/ocr',
+      appRoot: '/Applications/Binder.app/Contents/Resources/app',
+      packaged: true,
       port: 4321,
     })
   })
 
-  it('uses the project\'s data/ when run from the project, building the OCR helper from its source there', () => {
+  it('uses the project\'s data/ when run from the project, where the server builds the OCR helper from its source', () => {
     const paths = appPaths({ ...base, appRoot: '/dev/binder', packaged: false })
-    expect(paths).toMatchObject({ dataDir: '/dev/binder/data', envPath: '/dev/binder/data/.env', ocrSource: '/dev/binder/native/ocr.swift' })
+    expect(paths).toMatchObject({ dataDir: '/dev/binder/data', envPath: '/dev/binder/data/.env', appRoot: '/dev/binder', packaged: false })
   })
 
   it('takes BINDER_DATA_DIR and PORT for checks, and says when PORT is not a port number', () => {

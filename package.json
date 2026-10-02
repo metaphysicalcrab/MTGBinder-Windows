@@ -76,6 +76,7 @@
       "src/shared/**",
       "dist/web/**",
       "bin/ocr",
+      "native/ocr.ps1",
       "build/icons/trayTemplate*.png"
     ],
     "asar": false,

@@ -11,7 +11,8 @@ import { ensureCardNamesCurrent } from './cards/repo.ts'
 import { libraryPaths } from './config.ts'
 import { type DB, openDb, openFailureLine } from './db/index.ts'
 import { createCardLookups } from './scanner/lookups.ts'
-import { buildOcrHelper, createOcrClient } from './scanner/ocr-client.ts'
+import { createOcrClient } from './scanner/ocr-client.ts'
+import type { OcrHelper } from './scanner/ocr-helper.ts'
 import { createScanWorker } from './scanner/worker.ts'
 import { createScryfallClient, type ScryfallClient } from './scryfall/client.ts'
 import { listenFailure, locationWarnings } from './startup.ts'
@@ -25,10 +26,8 @@ export interface BinderOptions {
   envPath: string
   /** The built web app, served for every path outside /api. Without it (or when it isn't built), only the API. */
   webDistDir?: string
-  /** The OCR helper (spec §5.1.4). */
-  ocrBinary: string
-  /** The helper's Swift source, to build it from when it's missing or older. Binder.app ships it built, with none. */
-  ocrSource?: string
+  /** The OCR helper for this computer (spec §5.1.4), which ocrHelper() picks. */
+  ocr: OcrHelper
   /** 0 picks a free port. */
   port: number
   /** Default 127.0.0.1. */
@@ -101,12 +100,11 @@ export async function startBinder(options: BinderOptions): Promise<RunningBinder
   }
   const scryfall = options.scryfall ?? createScryfallClient()
   const bulk = createBulkImporter({ db, client: scryfall, dataDir: options.dataDir, log: (m) => log(`[card data] ${m}`) })
-  const { ocrSource } = options
+  const helper = options.ocr
   const ocr = createOcrClient({
-    command: [options.ocrBinary],
-    prepare: async () => {
-      if (ocrSource && (await buildOcrHelper(ocrSource, options.ocrBinary))) log('[scan] Built the OCR helper')
-    },
+    command: helper.command,
+    // Before the first scan. On a Mac it builds bin/ocr when its source is newer: "[scan] Built the OCR helper".
+    prepare: helper.prepare && (() => helper.prepare!((line) => log(`[scan] ${line}`))),
   })
   const worker = createScanWorker({ db, scansDir: paths.scansDir, ocr, lookups: createCardLookups(db) })
   const app = createApp({
