@@ -128,7 +128,7 @@ export function HandStrip({ seat }: { seat: SeatIndex }) {
           data-card={id}
           style={{ marginLeft: i === 0 ? 0 : step - width }}
           onPointerDown={(e) => board.beginCardDrag(e, id, 'hand')}
-          onDoubleClick={() => board.playCard(id)}
+          onDoubleClick={() => board.doubleClickCard(id)}
           onContextMenu={(e) => board.openCardMenu(e, id)}
           {...hoverOn(board, id)}
           className="cursor-grab touch-none pt-2 transition-transform hover:-translate-y-2"
@@ -328,7 +328,7 @@ function CommandZone({ seat, height }: { seat: SeatIndex; height: number }) {
             data-card={id}
             style={i > 0 ? { marginLeft: step - width } : undefined}
             onPointerDown={(e) => board.beginCardDrag(e, id, 'command')}
-            onDoubleClick={() => board.playCard(id)}
+            onDoubleClick={() => board.doubleClickCard(id)}
             onContextMenu={(e) => board.openCardMenu(e, id)}
             {...hoverOn(board, id)}
             className="cursor-grab touch-none"
@@ -346,9 +346,9 @@ function CommandZone({ seat, height }: { seat: SeatIndex; height: number }) {
 }
 
 /**
- * The bar between the halves: the turn, the stack when something's on it, and the game's buttons. Below lg, Log, Switch
- * side and End game wait behind a ⋯ (onMore). With a finger, Select makes a tap select cards (a finger has no Shift),
- * and Clear clears them (it has no Escape).
+ * The bar between the halves: the turn, the stack when something's on it, and the game's buttons. With a finger, Select
+ * makes a tap select cards (a finger has no Shift), and Clear clears them (it has no Escape); below lg, its Log, Switch
+ * side and End game wait behind a ⋯ (onMore). A mouse's bar keeps them at every width, as it always has.
  */
 export function TurnBar({
   saveStatus,
@@ -409,14 +409,14 @@ export function TurnBar({
         <BarButton onClick={onUndo} disabled={!canUndo} title={`Undo (${undoKeyLabel})`}>
           Undo
         </BarButton>
-        <div className="hidden gap-1.5 lg:flex">
+        <div className="hidden gap-1.5 lg:flex pointer-fine:flex">
           <BarButton onClick={onLog}>Log</BarButton>
           <BarButton onClick={onSwitch} disabled={!canSwitch} title="Switch side (Tab)">
             Switch side
           </BarButton>
           <BarButton onClick={onEnd}>End game</BarButton>
         </div>
-        <BarButton onClick={onMore} label="More: Log, Switch side, End game" className="lg:hidden">
+        <BarButton onClick={onMore} label="More: Log, Switch side, End game" className="lg:hidden pointer-fine:hidden">
           ⋯
         </BarButton>
         <button
@@ -464,14 +464,15 @@ function BarButton({
 
 /**
  * What's on the stack, oldest on the left: spells as cards, abilities as tags naming their card. A double-click resolves
- * an item; a finger's tap opens its menu, Resolve first.
+ * an item; a finger's tap opens its menu, Resolve first. A finger swiping sideways scrolls the strip to the newest; one
+ * moving up or down drags a spell off it.
  */
 function Stack() {
   const board = useBoard()
   const { game } = board
   if (game.stack.length === 0) return <div className="flex-1" />
   return (
-    <ol aria-label="The stack" className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
+    <ol aria-label="The stack" className="flex min-w-0 flex-1 touch-pan-x items-center gap-2 overflow-x-auto">
       <li className="shrink-0 text-xs text-stone-500">Stack:</li>
       {game.stack.map((item, i) => (
         <li
@@ -487,7 +488,7 @@ function Stack() {
           onContextMenu={(e) => board.openStackMenu(e, item.id)}
           onPointerDown={(e) => (item.kind === 'spell' ? board.beginCardDrag(e, item.id, 'stack') : board.beginHold(e, { item: item.id }))}
           {...hoverOn(board, item.kind === 'spell' ? item.id : item.source)}
-          className={`shrink-0 touch-none ${i === game.stack.length - 1 ? 'ring-2 ring-amber-500/70' : ''} rounded`}
+          className={`shrink-0 touch-pan-x ${i === game.stack.length - 1 ? 'ring-2 ring-amber-500/70' : ''} rounded`}
         >
           {item.kind === 'spell' ? (
             <CardView data={game.data[item.id]!} height={52} />

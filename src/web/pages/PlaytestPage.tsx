@@ -7,7 +7,7 @@ import { SetupView } from '../components/playtest/SetupView.tsx'
 import { useMediaQuery } from '../components/playtest/use-media-query.ts'
 import { useCoarsePointer } from '../lib/platform.ts'
 import { useEndGame, useGameSession, usePlaytestGame } from '../lib/playtest.ts'
-import { TABLE_MIN_WIDTH } from '../lib/playtest-board.ts'
+import { SMALL_SCREEN_QUERY } from '../lib/playtest-board.ts'
 
 /**
  * The Playtest page (spec §5.9): the game in progress, from its mulligans on, or a new game's setup. The deck
@@ -35,10 +35,9 @@ function GameView({ saved }: { saved: SavedGame }) {
   const session = useGameSession(saved)
   const endGame = useEndGame()
   const { game } = session
-  // The table needs a tablet's width, or a phone's on its side (M13). On a narrower phone the page says so, and shows
-  // the table anyway if asked; turned on its side, the phone gets the table at once. A narrow window on the computer
-  // gets the table, as it always has.
-  const narrowWindow = useMediaQuery(`(width < ${TABLE_MIN_WIDTH}px)`)
+  // The table needs a tablet (M13): on a phone, either way up, or a window narrower than a tablet's, the page says so,
+  // and shows the table anyway if asked. A narrow window on the computer gets the table, as it always has.
+  const smallScreen = useMediaQuery(SMALL_SCREEN_QUERY)
   const coarse = useCoarsePointer()
   const [anyway, setAnyway] = useState(false)
   if (game === null) {
@@ -64,11 +63,11 @@ function GameView({ saved }: { saved: SavedGame }) {
       />
     )
   }
-  if (narrowWindow && coarse && !anyway) {
+  if (smallScreen && coarse && !anyway) {
     return (
       <div className="mx-auto max-w-sm py-16 text-center text-stone-300">
         <h1 className="mb-3 font-serif text-2xl text-stone-50">Playtest</h1>
-        <p className="mb-6">Playtest needs a bigger screen: turn the phone sideways, or use a tablet or the PC.</p>
+        <p className="mb-6">Playtest needs a bigger screen: a tablet or the PC.</p>
         <button onClick={() => setAnyway(true)} className="rounded-md border border-stone-700 bg-stone-800 px-4 py-2.5 text-stone-100 hover:bg-stone-700">
           Show the table anyway
         </button>

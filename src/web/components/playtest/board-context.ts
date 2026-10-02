@@ -25,8 +25,11 @@ export interface BoardApi {
   play: (action: Action) => boolean
   /** Moves cards, first asking "Command zone instead?" for a commander going somewhere it may skip. */
   moveCards: (ids: string[], to: Dest) => void
-  /** A double-click: a permanent to the battlefield, an instant or sorcery onto the stack. */
-  playCard: (id: string) => void
+  /**
+   * A mouse's double-click on a card in hand or the command zone plays it: a permanent to the battlefield, an instant
+   * or sorcery onto the stack. A finger's tap plays it (tapAction); its double-tap's dblclick does nothing.
+   */
+  doubleClickCard: (id: string) => void
   beginCardDrag: (e: PointerEvent, id: string, source: DragSource) => void
   beginBoxSelect: (e: PointerEvent, seat: SeatIndex) => void
   /** A finger or a pen held on a library or an ability on the stack opens its menu; a mouse right-clicks. */

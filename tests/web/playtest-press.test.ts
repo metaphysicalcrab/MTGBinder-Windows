@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { dragStartPx, holdOpensMenu, isTouch, LONG_PRESS_MS, movedFar, type Press, tapAction, TABLE_MIN_WIDTH } from '../../src/web/lib/playtest-board.ts'
+import {
+  DOUBLE_TAP_MS,
+  dragStartPx,
+  holdOpensMenu,
+  isTouch,
+  LONG_PRESS_MS,
+  movedFar,
+  type Press,
+  SMALL_SCREEN_QUERY,
+  TABLE_MIN_SCREEN_HEIGHT,
+  TABLE_MIN_WIDTH,
+  tapAction,
+} from '../../src/web/lib/playtest-board.ts'
 
 // A press on the table by a mouse, a finger, or a pen (M13): when it's a drag, when holding it opens a menu, and what
 // it does when it comes up where it went down.
@@ -40,26 +52,57 @@ describe('a press on the playtest table', () => {
   it('taps a card on the battlefield, adds it to the selection with Shift or Select, or attaches cards to it', () => {
     const none = { attaching: false, selecting: false }
     for (const touch of [false, true]) {
-      expect(tapAction('battlefield', { touch, shift: false }, none)).toBe('tap')
-      expect(tapAction('battlefield', { touch, shift: true }, none)).toBe('select')
-      expect(tapAction('battlefield', { touch, shift: false }, { attaching: false, selecting: true })).toBe('select')
-      // Attaching comes first: the card tapped is the host, whatever the selection.
-      expect(tapAction('battlefield', { touch, shift: true }, { attaching: true, selecting: true })).toBe('attach')
+      // Right after a tap played a card from hand, too: a double-tap on the battlefield taps and untaps.
+      for (const sincePlay of [Infinity, 100]) {
+        expect(tapAction('battlefield', { touch, shift: false, sincePlay }, none)).toBe('tap')
+        expect(tapAction('battlefield', { touch, shift: true, sincePlay }, none)).toBe('select')
+        expect(tapAction('battlefield', { touch, shift: false, sincePlay }, { attaching: false, selecting: true })).toBe('select')
+        // Attaching comes first: the card tapped is the host, whatever the selection.
+        expect(tapAction('battlefield', { touch, shift: true, sincePlay }, { attaching: true, selecting: true })).toBe('attach')
+      }
     }
   })
 
-  it("opens a finger's menu off the battlefield (Play or Resolve first), and leaves a mouse's click to its double-click", () => {
+  it("plays a card a finger taps in hand or the command zone, and leaves a mouse's click to its double-click", () => {
     const none = { attaching: false, selecting: false }
-    for (const source of ['hand', 'command', 'stack', 'pile'] as const) {
-      expect(tapAction(source, { touch: true, shift: false }, none)).toBe('menu')
-      expect(tapAction(source, { touch: false, shift: false }, none)).toBe('none')
+    for (const source of ['hand', 'command'] as const) {
+      expect(tapAction(source, { touch: true, shift: false, sincePlay: Infinity }, none)).toBe('play')
+      expect(tapAction(source, { touch: false, shift: false, sincePlay: Infinity }, none)).toBe('none')
       // Neither Select nor attaching changes a tap off the battlefield.
-      expect(tapAction(source, { touch: true, shift: true }, { attaching: true, selecting: true })).toBe('menu')
+      expect(tapAction(source, { touch: true, shift: true, sincePlay: Infinity }, { attaching: true, selecting: true })).toBe('play')
     }
   })
 
-  it("needs a tablet's width for the table, which a phone has on its side", () => {
-    // Tailwind's md: a Pixel 7 is 412 px wide upright (too narrow) and 915 on its side.
+  it("plays one card for a double-tap, not the one that moves under the finger as well, then plays the next tap's", () => {
+    const none = { attaching: false, selecting: false }
+    expect(DOUBLE_TAP_MS).toBeGreaterThanOrEqual(300)
+    expect(DOUBLE_TAP_MS).toBeLessThanOrEqual(500)
+    for (const source of ['hand', 'command'] as const) {
+      expect(tapAction(source, { touch: true, shift: false, sincePlay: 0 }, none)).toBe('none')
+      expect(tapAction(source, { touch: true, shift: false, sincePlay: DOUBLE_TAP_MS - 1 }, none)).toBe('none')
+      expect(tapAction(source, { touch: true, shift: false, sincePlay: DOUBLE_TAP_MS }, none)).toBe('play')
+      expect(tapAction(source, { touch: true, shift: false, sincePlay: 2000 }, none)).toBe('play')
+    }
+  })
+
+  it("opens a finger's menu on the stack (Resolve first) and in a pile, and leaves a mouse's click to its double-click", () => {
+    const none = { attaching: false, selecting: false }
+    for (const source of ['stack', 'pile'] as const) {
+      for (const sincePlay of [Infinity, 100]) {
+        expect(tapAction(source, { touch: true, shift: false, sincePlay }, none)).toBe('menu')
+        expect(tapAction(source, { touch: false, shift: false, sincePlay }, none)).toBe('none')
+        expect(tapAction(source, { touch: true, shift: true, sincePlay }, { attaching: true, selecting: true })).toBe('menu')
+      }
+    }
+  })
+
+  it("needs a tablet for the table: a tablet's width, and a screen taller than a phone's on its side", () => {
+    // Tailwind's md: a Pixel 7 is 412 px wide upright (too narrow).
     expect(TABLE_MIN_WIDTH).toBe(768)
+    // A phone on its side is 360–430 px tall (a Pixel 7's 412); Android's smallest tablet, 600.
+    expect(TABLE_MIN_SCREEN_HEIGHT).toBeGreaterThan(430)
+    expect(TABLE_MIN_SCREEN_HEIGHT).toBeLessThanOrEqual(600)
+    // The screen's height, not the window's, which a tablet's keyboard shortens; either one too small is enough.
+    expect(SMALL_SCREEN_QUERY).toBe(`(width < 768px), (device-height < ${TABLE_MIN_SCREEN_HEIGHT}px)`)
   })
 })

@@ -53,6 +53,8 @@ type Drag = Press & { pointer: number; at: Point } & (
         /** Each card's center from the pointer, and its height, when the drag began. */
         offsets: Record<string, { dx: number; dy: number; height: number }>
         shift: boolean
+        /** When it came down (performance.now()), for a double-tap (DOUBLE_TAP_MS). */
+        time: number
       }
     | { kind: 'box'; seat: SeatIndex; field: DOMRect; shift: boolean }
     | { kind: 'hold'; target: HoldTarget }
@@ -212,6 +214,9 @@ export function Board({ saved, game, session }: { saved: SavedGame; game: GameSt
   const holdTimer = useRef<number | undefined>(undefined)
   // A finger's press has opened a menu: what the browser still makes of it is spent (the effect below).
   const spent = useRef(false)
+  // When a finger's tap last played a card, and the kind of pointer the last press was (see doubleClickCard).
+  const tapPlayed = useRef(-Infinity)
+  const lastPointer = useRef('')
 
   /** Ends the press under way, if there is one, without a drop or a tap. */
   const endPress = useCallback(() => {
@@ -387,7 +392,7 @@ export function Board({ saved, game, session }: { saved: SavedGame; game: GameSt
     [play, moveCards, tokenItems, openMenu],
   )
 
-  /** The menu a finger's press opens where it went down: held still on anything, or a tap on a card off the battlefield. */
+  /** The menu a finger's press opens where it went down: held still on anything, or a tap on the stack or in a pile. */
   const pressMenu = useCallback(
     (d: Drag) => {
       const at = { ...d.start, byFinger: true }
@@ -427,7 +432,8 @@ export function Board({ saved, game, session }: { saved: SavedGame; game: GameSt
       }
       const { card } = d
       if (!d.moved) {
-        switch (tapAction(d.source, d, { attaching: waiting !== null, selecting: adding })) {
+        const press = { touch: d.touch, shift: d.shift, sincePlay: d.time - tapPlayed.current }
+        switch (tapAction(d.source, press, { attaching: waiting !== null, selecting: adding })) {
           case 'attach':
             if (waiting && !waiting.includes(card)) for (const id of waiting) play({ type: 'attach', id, to: card })
             setAttaching(null)
@@ -441,6 +447,14 @@ export function Board({ saved, game, session }: { saved: SavedGame; game: GameSt
           }
           case 'tap':
             tapCards(card)
+            break
+          case 'play':
+            // An emblem isn't played: it stays in the command zone, and a tap opens its menu instead.
+            if (g.data[card]!.kind === 'emblem') pressMenu(d)
+            else {
+              playCard(card)
+              tapPlayed.current = performance.now()
+            }
             break
           case 'menu':
             pressMenu(d)
@@ -472,7 +486,18 @@ export function Board({ saved, game, session }: { saved: SavedGame; game: GameSt
       const moving = d.ids.filter((id) => g.cards[id]!.zone !== to.zone)
       if (moving.length > 0) moveCards(moving, to)
     },
-    [play, moveCards, tapCards, pressMenu],
+    [play, moveCards, playCard, tapCards, pressMenu],
+  )
+
+  /**
+   * A double-click on a card in hand or the command zone plays it: a mouse's. A finger's or a pen's tap has played it
+   * already (tapAction), and a double-tap's dblclick would play the card that moved under it.
+   */
+  const doubleClickCard = useCallback(
+    (id: string) => {
+      if (!isTouch(lastPointer.current)) playCard(id)
+    },
+    [playCard],
   )
 
   // One set of window listeners follows a press from its pointerdown to its pointerup, or to its pointercancel (the
@@ -552,6 +577,7 @@ export function Board({ saved, game, session }: { saved: SavedGame; game: GameSt
         source,
         offsets,
         shift: e.shiftKey,
+        time: performance.now(),
         start,
         at: start,
         moved: false,
@@ -588,11 +614,16 @@ export function Board({ saved, game, session }: { saved: SavedGame; game: GameSt
   const openStackMenu = useCallback((e: MouseEvent, item: string) => stackMenu(menuEvent(e), item), [stackMenu])
 
   // A finger's press that opened a menu: the browser's own long-press (a contextmenu) and the click the press ends with
-  // would land on the menu now over it, closing it or choosing what's under the finger. They're spent, until the next
-  // press. And while a finger is down, its long-press is the board's own (LONG_PRESS_MS), not the browser's.
+  // would land on the menu now over it, closing it or choosing what's under the finger, and its mousedown would focus
+  // the item under the finger, which would look chosen. They're spent, until the next press. And while a finger is
+  // down, its long-press is the board's own (LONG_PRESS_MS), not the browser's.
   useEffect(() => {
-    const onDown = () => {
+    const onDown = (e: globalThis.PointerEvent) => {
       spent.current = false
+      lastPointer.current = e.pointerType
+    }
+    const onMouseDown = (e: globalThis.MouseEvent) => {
+      if (spent.current) e.preventDefault()
     }
     const onContextMenu = (e: Event) => {
       if (!spent.current && !dragRef.current?.touch) return
@@ -607,10 +638,12 @@ export function Board({ saved, game, session }: { saved: SavedGame; game: GameSt
       e.stopPropagation()
     }
     window.addEventListener('pointerdown', onDown, true)
+    window.addEventListener('mousedown', onMouseDown, true)
     window.addEventListener('contextmenu', onContextMenu, true)
     window.addEventListener('click', onClick, true)
     return () => {
       window.removeEventListener('pointerdown', onDown, true)
+      window.removeEventListener('mousedown', onMouseDown, true)
       window.removeEventListener('contextmenu', onContextMenu, true)
       window.removeEventListener('click', onClick, true)
       window.clearTimeout(holdTimer.current)
@@ -707,7 +740,7 @@ export function Board({ saved, game, session }: { saved: SavedGame; game: GameSt
     coarse,
     play,
     moveCards,
-    playCard,
+    doubleClickCard,
     beginCardDrag,
     beginBoxSelect,
     beginHold,
@@ -718,7 +751,7 @@ export function Board({ saved, game, session }: { saved: SavedGame; game: GameSt
     openPile: (seat, zone) => setPile({ seat, zone }),
   }
 
-  /** The turn bar's ⋯, on a window too narrow for all its buttons: the ones that don't fit. */
+  /** The turn bar's ⋯, where a finger's bar is too narrow for all its buttons: the ones that don't fit. */
   const openBarMenu = (e: MouseEvent) =>
     openMenu(menuEvent(e), 'The game', [
       { label: logOpen ? 'Close the log' : 'Log', onSelect: () => setLogOpen((open) => !open) },
