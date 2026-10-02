@@ -238,6 +238,13 @@ export function useAnswer(threadId: number) {
       controller.current = ctrl
       dispatch({ type: 'start', stored: queryClient.getQueryData<ThreadDetail>(['thread', threadId])?.items ?? [] })
       let madeDeck = false
+      // A phone that sleeps, or switches to another app, cuts the stream. That's no error to report: the server keeps
+      // what was said, and the conversation offers Continue when it shows again.
+      let hidden = document.hidden
+      const onVisibility = () => {
+        if (document.hidden) hidden = true
+      }
+      document.addEventListener('visibilitychange', onVisibility)
       try {
         await streamAnswer(
           path,
@@ -254,8 +261,10 @@ export function useAnswer(threadId: number) {
           ctrl.signal,
         )
       } catch (err) {
-        if (!ctrl.signal.aborted) toast.error(err instanceof Error ? err.message : String(err))
+        const cutWhileHidden = hidden && !(err instanceof ApiRequestError)
+        if (!ctrl.signal.aborted && !cutWhileHidden) toast.error(err instanceof Error ? err.message : String(err))
       } finally {
+        document.removeEventListener('visibilitychange', onVisibility)
         if (madeDeck) invalidateCollection(queryClient, { keepScryfallSearches: true })
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ['thread', threadId] }),

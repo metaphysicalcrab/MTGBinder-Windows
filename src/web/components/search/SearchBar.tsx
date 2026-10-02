@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { EMPTY_FORM, type AdvancedForm } from '../../../shared/search/advanced.ts'
 import { composeQuery, formSync } from '../../lib/advanced-sync.ts'
+import { useCoarsePointer } from '../../lib/platform.ts'
 import type { SearchScope } from '../../lib/search-state.ts'
 import { AdvancedPanel } from './AdvancedPanel.tsx'
 
@@ -71,6 +72,8 @@ export function SearchBar({ q, scope, scopeLocked = false, queryError, onSearch,
   }
 
   const showError = queryError !== null && draft === q
+  // A phone's box shows a shorter example: the long one would be cut off.
+  const narrow = useCoarsePointer()
   const scopes: Array<[SearchScope, string]> = scope === 'local' ? [...SCOPE_LABELS, ['local', 'Local data']] : SCOPE_LABELS
 
   return (
@@ -91,7 +94,7 @@ export function SearchBar({ q, scope, scopeLocked = false, queryError, onSearch,
                 role="radio"
                 aria-checked={scope === value}
                 onClick={() => changeScope(value)}
-                className={`rounded-md px-3 py-1.5 text-sm ${scope === value ? 'bg-amber-500 font-medium text-stone-950' : 'text-stone-400 hover:text-stone-100'}`}
+                className={`rounded-md px-3 py-1.5 text-sm pointer-coarse:py-2 ${scope === value ? 'bg-amber-500 font-medium text-stone-950' : 'text-stone-400 hover:text-stone-100'}`}
               >
                 {label}
               </button>
@@ -99,24 +102,42 @@ export function SearchBar({ q, scope, scopeLocked = false, queryError, onSearch,
           </div>
         )}
         <input
+          type="search"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           aria-label="Search query"
           aria-invalid={showError}
-          placeholder={scope === 'library' ? 'Search my library, e.g. t:creature c:g (blank lists everything)' : 'e.g. t:creature c:g mv<=3 o:"draw a card"'}
-          className={`h-10 min-w-64 flex-1 rounded-lg border bg-stone-900/80 px-3 font-mono text-sm text-stone-100 outline-none placeholder:font-sans placeholder:text-stone-500 focus:ring-2 focus:ring-amber-500/20 ${showError ? 'border-rose-700' : 'border-stone-700 focus:border-amber-500/70'}`}
+          // Scryfall syntax, not words: a phone's keyboard mustn't capitalize t:elf or correct c:g.
+          autoCapitalize="none"
+          autoCorrect="off"
+          autoComplete="off"
+          spellCheck={false}
+          enterKeyHint="search"
+          placeholder={
+            scope === 'library'
+              ? narrow
+                ? 'Search my library, e.g. t:elf'
+                : 'Search my library, e.g. t:creature c:g (blank lists everything)'
+              : narrow
+                ? 'e.g. t:creature c:g mv<=3'
+                : 'e.g. t:creature c:g mv<=3 o:"draw a card"'
+          }
+          className={`h-10 min-w-0 flex-1 basis-full rounded-lg border bg-stone-900/80 px-3 font-mono text-sm text-stone-100 outline-none placeholder:font-sans placeholder:text-stone-500 focus:ring-2 focus:ring-amber-500/20 sm:min-w-64 sm:basis-0 ${showError ? 'border-rose-700' : 'border-stone-700 focus:border-amber-500/70'}`}
         />
-        <button type="submit" className="h-10 rounded-lg bg-amber-500 px-4 text-sm font-medium text-stone-950 hover:bg-amber-400">
-          Search
-        </button>
-        <button
-          type="button"
-          aria-expanded={advancedOpen}
-          onClick={() => setAdvancedOpen((open) => !open)}
-          className="h-10 rounded-lg border border-stone-700 px-3 text-sm text-stone-300 hover:bg-stone-800"
-        >
-          Advanced {advancedOpen ? '▴' : '▾'}
-        </button>
+        {/* On a phone, the buttons share a line of their own under the box. */}
+        <div className="flex w-full gap-2 sm:contents">
+          <button type="submit" className="h-10 flex-1 rounded-lg bg-amber-500 px-4 text-sm font-medium text-stone-950 hover:bg-amber-400 sm:flex-initial">
+            Search
+          </button>
+          <button
+            type="button"
+            aria-expanded={advancedOpen}
+            onClick={() => setAdvancedOpen((open) => !open)}
+            className="h-10 flex-1 rounded-lg border border-stone-700 px-3 text-sm text-stone-300 hover:bg-stone-800 sm:flex-initial"
+          >
+            Advanced {advancedOpen ? '▴' : '▾'}
+          </button>
+        </div>
       </div>
 
       {showError && (

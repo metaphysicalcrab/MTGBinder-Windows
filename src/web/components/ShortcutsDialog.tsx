@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
+import { useBackToClose } from '../lib/back-to-close.ts'
 import { SHORTCUTS } from '../lib/shortcuts.ts'
 
 /**
@@ -12,9 +13,10 @@ export function useOpenShortcuts(): () => void {
   return useContext(OpenShortcutsContext)
 }
 
-/** The keyboard shortcuts, as `?` shows them: a modal dialog that Escape, a click outside, or Close closes. */
+/** The keyboard shortcuts, as `?` shows them: a modal dialog that Escape, Back, a click outside, or Close closes. */
 export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
   const closeRef = useRef<HTMLButtonElement>(null)
+  useBackToClose(true, onClose)
   // What had focus before, read on the first render (an effect would run again under StrictMode, after focus moved).
   const [opener] = useState(() => (document.activeElement instanceof HTMLElement ? document.activeElement : null))
 

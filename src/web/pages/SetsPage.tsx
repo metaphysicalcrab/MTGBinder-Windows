@@ -5,7 +5,7 @@ import { SetBar } from '../components/sets/SetBar.tsx'
 import { plural } from '../lib/format.ts'
 import { filterSets, readSetSort, releaseMonth, SET_SORTS, setTypeLabel, sortSets, useSets, type SetSort } from '../lib/sets.ts'
 
-const input = 'rounded-md border border-stone-700 bg-stone-900 px-2 py-1.5 text-sm text-stone-100'
+const input = 'rounded-md border border-stone-700 bg-stone-900 px-2 py-1.5 text-sm text-stone-100 pointer-coarse:py-2.5'
 
 /** Every set with a copy owned, and how complete each is (spec §5.8). The sort and filter live in the address. */
 export function SetsPage() {
@@ -75,6 +75,13 @@ export function SetsPage() {
               }}
               placeholder="Filter by name or code"
               aria-label="Filter sets by name or code"
+              // Set names and codes: no capitals or corrections from a phone's keyboard. It filters as it's typed, so
+              // Enter only puts the keyboard away.
+              autoCapitalize="none"
+              autoCorrect="off"
+              autoComplete="off"
+              spellCheck={false}
+              enterKeyHint="search"
               className={`${input} w-full max-w-xs`}
             />
             <label className="ml-auto flex items-center gap-2 text-sm text-stone-400">
