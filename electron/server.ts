@@ -1,9 +1,11 @@
-// Binder's server inside Binder.app, in its own process (Electron's utility process), so the window and the menu-bar
+// Binder's server inside the desktop app, in its own process (Electron's utility process), so the window and the tray
 // icon stay responsive while the library does slow work (a backup before an upgrade, compacting, a card data refresh).
-// main.ts starts it with the paths as JSON; it answers with messages (ServerMessage) and stops when told to.
+// main.ts starts it with the paths as JSON in BINDER_APP_PATHS (the environment, not the command line, whose quoting
+// Windows paths, with their backslashes and a name's spaces or accents, needn't survive); it answers with messages
+// (ServerMessage) and stops when told to.
 import { ocrHelper } from '../src/server/scanner/ocr-helper.ts'
 import { type RunningBinder, startBinder, StartupError } from '../src/server/start.ts'
-import type { AppPaths } from './paths.ts'
+import { type AppPaths, PATHS_VARIABLE } from './paths.ts'
 
 /** What the server tells the app. */
 export type ServerMessage =
@@ -14,7 +16,9 @@ export type ServerMessage =
 
 const port = process.parentPort
 const post = (message: ServerMessage) => port.postMessage(message)
-const paths = JSON.parse(process.argv[2] ?? '{}') as AppPaths
+const paths = JSON.parse(process.env[PATHS_VARIABLE] ?? '{}') as AppPaths
+// Not passed on to the OCR helper.
+delete process.env[PATHS_VARIABLE]
 let binder: RunningBinder | null = null
 
 port.on('message', ({ data }: { data: unknown }) => {

@@ -2,6 +2,7 @@
   "name": "binder",
   "version": "0.1.0",
   "description": "Personal MTG collection manager: collection, decks, scanning, and a deckbuilding chat.",
+  "author": "Binder",
   "private": true,
   "type": "module",
   "main": "electron/main.ts",
@@ -75,9 +76,7 @@
       "src/server/**",
       "src/shared/**",
       "dist/web/**",
-      "bin/ocr",
-      "native/ocr.ps1",
-      "build/icons/trayTemplate*.png"
+      "!node_modules/better-sqlite3/{deps,src}/**"
     ],
     "asar": false,
     "npmRebuild": false,
@@ -90,7 +89,34 @@
       "extendInfo": {
         "NSCameraUsageDescription": "Binder uses the camera to scan your cards.",
         "NSCameraUseContinuityCameraDeviceType": true
-      }
+      },
+      "files": [
+        "bin/ocr",
+        "build/icons/trayTemplate*.png",
+        "!node_modules/better-sqlite3/prebuilds/{linux,linuxmusl,win32}-*"
+      ]
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "build/icons/Binder.ico",
+      "executableName": "Binder",
+      "publish": null,
+      "files": [
+        "native/ocr.ps1",
+        "build/icons/tray.ico",
+        "build/icons/Binder.ico",
+        "!node_modules/better-sqlite3/prebuilds/{darwin,linux,linuxmusl}-*"
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Binder",
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "Binder-Setup-${version}.${ext}"
     }
   }
 }

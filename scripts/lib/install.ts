@@ -1,33 +1,34 @@
-import { execFileSync } from 'node:child_process'
-import fs from 'node:fs'
-import path from 'node:path'
+// What `pnpm app` and `pnpm move-library` do differently on each platform, behind one interface: Binder.app on a Mac
+// (install-darwin.ts), Binder's installer on Windows (install-win32.ts).
+import { appRunning, macApp, MAC_INSTALLED } from './install-darwin.ts'
+import { binderRunning, windowsApp } from './install-win32.ts'
 
-/** The Binder.app electron-builder made in `releaseDir`: `release/mac-arm64/`, or `release/mac/` on an Intel Mac. */
-export function builtApp(releaseDir: string): string {
-  const found = (fs.existsSync(releaseDir) ? fs.readdirSync(releaseDir) : [])
-    .filter((dir) => dir.startsWith('mac'))
-    .map((dir) => path.join(releaseDir, dir, 'Binder.app'))
-    .find((bundle) => fs.existsSync(bundle))
-  if (!found) throw new Error(`No Binder.app in ${releaseDir}`)
-  return found
+/** The desktop app on one platform, as `pnpm app` packages and installs it. */
+export interface DesktopApp {
+  /** What it's called while it's packaged: "Binder.app" on a Mac, "Binder" on Windows. */
+  name: string
+  /** Why it can't be installed now, or null; asked before anything is built. */
+  blocked(): string | null
+  /**
+   * Builds what's packaged besides the web app (the Mac's OCR helper), and packages Binder with electron-builder (on
+   * Windows, once a running Binder has quit): to install, or (install false) to run from release/. Returns what it
+   * made.
+   */
+  package(install: boolean): Promise<string>
+  /** Installs what package() made, replacing the installed Binder; returns the line saying where it is now. */
+  install(built: string): Promise<string>
 }
 
-/** Copies Binder.app into `applicationsDir`, replacing the one there, and returns where it is. */
-export function installApp(built: string, applicationsDir: string): string {
-  const target = path.join(applicationsDir, 'Binder.app')
-  fs.mkdirSync(applicationsDir, { recursive: true })
-  fs.rmSync(target, { recursive: true, force: true })
-  // ditto keeps what a Mac app needs: its signature, extended attributes, and the frameworks' symlinks.
-  execFileSync('/usr/bin/ditto', [built, target])
-  return target
+/** The desktop app on this platform, or null where `pnpm app` doesn't make one. */
+export function desktopApp(platform: NodeJS.Platform = process.platform): DesktopApp | null {
+  if (platform === 'darwin') return macApp()
+  if (platform === 'win32') return windowsApp()
+  return null
 }
 
-/** Whether Binder.app is running from this path (replacing it then would pull files from under it). */
-export function appRunning(bundle: string): boolean {
-  try {
-    execFileSync('/usr/bin/pgrep', ['-f', path.join(bundle, 'Contents', 'MacOS', 'Binder')], { stdio: 'ignore' })
-    return true
-  } catch {
-    return false
-  }
+/** Whether the installed desktop app is running: Binder.app (pgrep) on a Mac, Binder.exe (tasklist) on Windows. */
+export function desktopRunning(platform: NodeJS.Platform = process.platform): boolean {
+  if (platform === 'darwin') return appRunning(MAC_INSTALLED)
+  if (platform === 'win32') return binderRunning()
+  return false
 }
