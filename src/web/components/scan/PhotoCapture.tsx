@@ -8,10 +8,9 @@ import {
   moveGuide,
   openPhoto,
   PhotoError,
-  photoToCapture,
+  photoToSend,
   type Point,
   type RelativeGuide,
-  relativeGuide,
   resizeGuide,
   startingGuide,
 } from '../../lib/photo-capture.ts'
@@ -101,9 +100,16 @@ function PhotoButton({
  */
 function usePhotos(onCapture: (jpeg: Blob) => void) {
   const [photo, setPhoto] = useState<Photo | null>(null)
+  // The photo under review, as Use photo sees it once its capture is made: another (or none) when the review closed.
+  const reviewing = useRef<Photo | null>(null)
+  const show = (next: Photo | null) => {
+    reviewing.current = next
+    setPhoto(next)
+  }
   const [opening, setOpening] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [making, setMaking] = useState(false)
+  // The id of the photo whose capture is being made.
+  const [making, setMaking] = useState<number | null>(null)
   const last = useRef<RelativeGuide | null>(null)
   const photoIds = useRef(0)
   const cameraRef = useRef<HTMLInputElement>(null)
@@ -126,32 +132,34 @@ function usePhotos(onCapture: (jpeg: Blob) => void) {
     setOpening(true)
     openPhoto(file)
       .then(
-        (opened) => (alive.current ? setPhoto({ ...opened, id: ++photoIds.current, source }) : opened.bitmap.close()),
+        (opened) => (alive.current ? show({ ...opened, id: ++photoIds.current, source }) : opened.bitmap.close()),
         (err: unknown) => alive.current && setError(photoProblem(err)),
       )
       .finally(() => alive.current && setOpening(false))
   }
 
+  // Cancel, Escape and Back still close the review while the capture is being made, and then nothing is sent.
   const use = async (guide: Rect) => {
     if (!photo) return
-    setMaking(true)
+    setMaking(photo.id)
     try {
-      const jpeg = await photoToCapture(photo.bitmap, guide)
-      last.current = relativeGuide(guide, photo.bitmap.width, photo.bitmap.height)
-      onCapture(jpeg)
+      const made = await photoToSend(photo.bitmap, guide, () => !alive.current || reviewing.current !== photo)
+      if (!made) return
+      last.current = made.last
+      onCapture(made.jpeg)
       // A short buzz says it went, where the phone can (vibrate needs a tap on the page first, which Use photo is).
       navigator.vibrate?.(40)
-      setPhoto(null)
+      show(null)
     } catch (err) {
       setError(photoProblem(err))
     } finally {
-      setMaking(false)
+      setMaking((id) => (id === photo.id ? null : id))
     }
   }
 
   const retake = () => {
     const input = (photo?.source === 'library' ? libraryRef : cameraRef).current
-    setPhoto(null)
+    show(null)
     setError(null)
     // In the same tap, which a file input needs to open.
     input?.click()
@@ -162,18 +170,25 @@ function usePhotos(onCapture: (jpeg: Blob) => void) {
       key={photo.id}
       photo={photo}
       initial={startingGuide(photo.bitmap.width, photo.bitmap.height, last.current)}
-      making={making}
+      making={making === photo.id}
       error={error}
       onUse={(guide) => void use(guide)}
       onRetake={retake}
       onCancel={() => {
-        setPhoto(null)
+        show(null)
         setError(null)
       }}
     />
   )
   return { pick, opening, error: photo ? null : error, review, cameraRef, libraryRef }
 }
+
+/**
+ * The review's layout: the title, the photo, and the controls under it; on a phone held sideways (a window in landscape
+ * too short for that), the photo beside the title and controls, rather than squeezed into the height they leave.
+ */
+const REVIEW_LAYOUT =
+  "[grid-template:'head'_auto_'photo'_minmax(0,1fr)_'controls'_auto_/_minmax(0,1fr)] [@media(orientation:landscape)_and_(max-height:32rem)]:[grid-template:'photo_head'_auto_'photo_controls'_minmax(0,1fr)_/_minmax(0,1fr)_20rem]"
 
 /**
  * The photo, with the card guide to fit over the card (M13): drag it, pinch or use the slider to size it (it stays card
@@ -223,7 +238,18 @@ function PhotoReview({
     return () => window.removeEventListener('keydown', onKey)
   }, [onCancel])
 
-  // The photo is shown as large as the room below the title and above the buttons allows.
+  // The page behind stays where it was while the review is open: neither the scroll wheel (which sizes the guide) nor a
+  // finger on the title or buttons scrolls it.
+  useEffect(() => {
+    const root = document.documentElement
+    const before = root.style.overflow
+    root.style.overflow = 'hidden'
+    return () => {
+      root.style.overflow = before
+    }
+  }, [])
+
+  // The photo is shown as large as the room beside the title and buttons allows.
   useEffect(() => {
     const el = areaRef.current
     if (!el) return
@@ -266,9 +292,9 @@ function PhotoReview({
       role="dialog"
       aria-modal="true"
       aria-labelledby="photo-review-heading"
-      className="fixed inset-0 z-50 flex flex-col bg-stone-950 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
+      className={`fixed inset-0 z-50 grid bg-stone-950 pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] ${REVIEW_LAYOUT}`}
     >
-      <div className="flex items-center justify-between gap-3 px-4 py-2">
+      <div className="flex items-center justify-between gap-3 px-4 py-2 [grid-area:head]">
         <h2 id="photo-review-heading" className="font-serif text-lg text-stone-50">
           Fit the guide to the card
         </h2>
@@ -308,7 +334,7 @@ function PhotoReview({
           else return
           e.preventDefault()
         }}
-        className="relative min-h-0 flex-1 cursor-move touch-none overflow-hidden outline-none select-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+        className="relative min-h-0 cursor-move touch-none overflow-hidden outline-none select-none [grid-area:photo] focus-visible:ring-2 focus-visible:ring-amber-500/60"
       >
         {area && scale > 0 && (
           <div
@@ -329,7 +355,7 @@ function PhotoReview({
           </div>
         )}
       </div>
-      <div className="mx-auto w-full max-w-xl space-y-3 px-4 py-3">
+      <div className="mx-auto min-h-0 w-full max-w-xl space-y-3 overflow-y-auto px-4 py-3 [grid-area:controls]">
         <p className="text-sm text-stone-400">
           {touch
             ? 'Drag the guide onto the card, and pinch or use the slider to fit it to the card’s edges.'

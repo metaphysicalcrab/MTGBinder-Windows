@@ -11,6 +11,7 @@ import {
   PHOTO_TOO_LARGE,
   PhotoError,
   photoCrop,
+  photoToSend,
   relativeGuide,
   resizeGuide,
   startingGuide,
@@ -150,7 +151,54 @@ describe('openPhoto', () => {
     })
     await expect(unreadable).rejects.toThrow(PhotoError)
     await expect(unreadable).rejects.toThrow(UNREADABLE_PHOTO)
-    expect(UNREADABLE_PHOTO).toBe("This photo can't be read here: set the camera to JPEG (Most compatible), or take it again.")
+    expect(UNREADABLE_PHOTO).toBe("This photo can't be read here: turn off HEIF (high efficiency) photos in the camera's settings, or take it again.")
     await expect(openPhoto(photo, cannot, async () => 8160)).rejects.toThrow(PHOTO_TOO_LARGE)
+  })
+})
+
+describe('photoToSend', () => {
+  const guide = guideAt(1500, 2000, 2000, 3000, 4000)
+  const jpeg = new Blob(['jpeg'], { type: 'image/jpeg' })
+  // A bitmap that's 0 × 0 once let go of, as an ImageBitmap is.
+  const photo = () => {
+    const bitmap = { width: 3000, height: 4000, close: () => Object.assign(bitmap, { width: 0, height: 0 }) }
+    return bitmap
+  }
+
+  it('sends the capture, and where the guide was for the next photo', async () => {
+    const bitmap = photo()
+    const made = await photoToSend(bitmap, guide, () => false, async (b, g) => (expect([b, g]).toEqual([bitmap, guide]), jpeg))
+    expect(made).toEqual({ jpeg, last: relativeGuide(guide, 3000, 4000) })
+  })
+
+  it('sends nothing when the review was closed while the capture was being made', async () => {
+    // Cancel while Sending…: the review closes, and lets go of the photo, before the JPEG is ready.
+    let closed = false
+    const bitmap = photo()
+    const make = async () => {
+      closed = true
+      bitmap.close()
+      return jpeg
+    }
+    expect(await photoToSend(bitmap, guide, () => closed, make)).toBeNull()
+    const failing = async () => {
+      closed = true
+      throw new PhotoError("Couldn't make a capture from this photo.")
+    }
+    expect(await photoToSend(photo(), guide, () => closed, failing)).toBeNull()
+  })
+
+  it('keeps the guide by the size the photo had, even if it was let go of meanwhile', async () => {
+    const bitmap = photo()
+    const made = await photoToSend(bitmap, guide, () => false, async () => (bitmap.close(), jpeg))
+    expect(made?.last).toEqual(relativeGuide(guide, 3000, 4000))
+    expect(startingGuide(3000, 4000, made!.last)).toEqual(guide)
+  })
+
+  it('says why a capture failed while the review is open', async () => {
+    const failing = async () => {
+      throw new PhotoError("Couldn't make a capture from this photo.")
+    }
+    await expect(photoToSend(photo(), guide, () => false, failing)).rejects.toThrow(PhotoError)
   })
 })

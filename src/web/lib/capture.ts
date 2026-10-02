@@ -119,15 +119,20 @@ export const NEW_CARD_THRESHOLD = 12
  * How likely a camera is the one mounted over the scanning area, from its label, best first: an iPhone (Continuity
  * Camera), a phone's or tablet's back camera ("camera2 0, facing back" on Android, "Microsoft Camera Rear" on a
  * Surface) or a document camera; then any other camera; then the computer's own, facing the owner (a Mac's FaceTime
- * camera, a Windows laptop's "Integrated Webcam", "HD User Facing" or "HP TrueVision HD Camera", a phone's front
- * camera); then Desk View and virtual cameras (made from another camera's picture). A renamed iPhone's camera is named
- * after the phone ("Kason's Phone Camera"), so any camera that isn't the computer's own is the next best guess: a USB
- * webcam, say.
+ * camera, a Windows laptop's "Integrated Webcam", "HD User Facing", "HP TrueVision HD Camera", "USB2.0 HD UVC WebCam" or
+ * plain "HD WebCam", a phone's front camera); then Desk View and virtual cameras (made from another camera's picture).
+ * A renamed iPhone's camera is named after the phone ("Kason's Phone Camera"), so any camera that isn't the computer's
+ * own is the next best guess: a USB webcam, say ("HD Pro Webcam C920"). Chrome puts a USB camera's ids after its name
+ * ("HD WebCam (04f2:b5d7)"), which the names matched whole leave out.
  */
 export function cameraRank(label: string): number {
   if (/desk view|virtual/i.test(label)) return 3
   if (/iphone|\bback\b|\brear\b|environment|document|ipevo|czur/i.test(label)) return 0
-  if (/facetime|built-in|macbook|imac|studio display|integrated|user facing|\bfront\b|truevision|wide vision|easycamera/i.test(label)) {
+  const name = label.replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)$/i, '')
+  if (
+    /facetime|built-in|macbook|imac|studio display|integrated|user facing|\bfront\b|truevision|wide vision|easycamera|uvc webcam|chicony/i.test(label) ||
+    /^(hd webcam|hp hd camera)$/i.test(name)
+  ) {
     return BUILT_IN_CAMERA_RANK
   }
   return 1

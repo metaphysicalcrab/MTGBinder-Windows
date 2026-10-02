@@ -185,6 +185,19 @@ describe('choosing a camera', () => {
     expect(preferredCamera([camera('Microsoft Camera Front'), camera('Microsoft Camera Rear')], null)?.label).toBe('Microsoft Camera Rear')
   })
 
+  it("knows the names laptop makers give their own cameras, without taking a USB webcam's for one", () => {
+    // An ASUS's and an Acer's own cameras, listed first as Windows does, beside a Logitech webcam over the mat.
+    const c920 = camera('HD Pro Webcam C920 (046d:082d)')
+    expect(preferredCamera([camera('USB2.0 HD UVC WebCam'), c920], null)).toBe(c920)
+    expect(preferredCamera([camera('HD WebCam (04f2:b5d7)'), c920], null)).toBe(c920)
+    for (const label of ['USB2.0 HD UVC WebCam', 'USB2.0 VGA UVC WebCam (13d3:5165)', 'HD WebCam', 'HD WebCam (04f2:b5d7)', 'HP HD Camera', 'Chicony USB2.0 Camera']) {
+      expect([label, cameraRank(label)]).toEqual([label, BUILT_IN_CAMERA_RANK])
+    }
+    for (const label of ['HD Webcam C270', 'HD Webcam C615 (046d:082c)', 'HD Pro Webcam C920', 'Logitech BRIO', 'HP 320 FHD Webcam']) {
+      expect([label, cameraRank(label)]).toEqual([label, 1])
+    }
+  })
+
   it("prefers a phone's back camera to its front one, whichever is listed first", () => {
     const front = camera('camera2 1, facing front')
     const back = camera('camera2 0, facing back')

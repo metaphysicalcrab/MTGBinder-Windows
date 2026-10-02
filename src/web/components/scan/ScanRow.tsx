@@ -195,7 +195,11 @@ export function ScanRow({ item }: { item: ScanItem }) {
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             {card ? (
-              <button onClick={() => drawer.open(card.id)} className="max-w-full truncate text-left font-medium text-stone-100 hover:text-amber-300">
+              <button
+                onClick={() => drawer.open(card.id)}
+                // A finger's height on a touch screen, over the line below it, without making the row taller.
+                className="max-w-full truncate text-left font-medium text-stone-100 hover:text-amber-300 pointer-coarse:relative pointer-coarse:-my-2 pointer-coarse:py-2"
+              >
                 {card.name}
               </button>
             ) : (

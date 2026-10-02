@@ -124,8 +124,11 @@ export function startingGuide(photoWidth: number, photoHeight: number, last: Rel
 /** A photo that can't be used, with what to do about it, said as the Scan page shows it. */
 export class PhotoError extends Error {}
 
-/** Said when the browser can't read the photo at all: an HEIC photo in Chrome, say. */
-export const UNREADABLE_PHOTO = "This photo can't be read here: set the camera to JPEG (Most compatible), or take it again."
+/**
+ * Said when the browser can't read the photo at all: an HEIC photo in Chrome, say. Each camera app names the setting
+ * its own way ("High efficiency pictures" on a Samsung, "High Efficiency" on an iPhone), so it's said by the format.
+ */
+export const UNREADABLE_PHOTO = "This photo can't be read here: turn off HEIF (high efficiency) photos in the camera's settings, or take it again."
 /** Said when a photo is too large to open even at half size. */
 export const PHOTO_TOO_LARGE = "This photo is too large to open on this device: set the camera to a lower resolution, or take it again."
 
@@ -205,5 +208,34 @@ export async function photoToCapture(photo: Blob | ImageBitmap, guide?: Rect): P
     )
   } finally {
     if (photo instanceof Blob) bitmap.close()
+  }
+}
+
+/** What Use photo sends: the photo's capture, and where its guide was (relativeGuide) for the next photo. */
+export interface PhotoToSend {
+  jpeg: Blob
+  last: RelativeGuide
+}
+
+/**
+ * Use photo: the photo's capture (photoToCapture) and where its guide was; null when the review was closed while the
+ * capture was being made (`closed`: Cancel, Escape or Back), so a photo the owner changed their mind about isn't sent.
+ * The photo's size is read first: closing the review lets go of the photo, and a bitmap let go of is 0 × 0. `make`
+ * stands in for photoToCapture in tests.
+ */
+export async function photoToSend<Bitmap extends { width: number; height: number } = ImageBitmap>(
+  bitmap: Bitmap,
+  guide: Rect,
+  closed: () => boolean,
+  make: (bitmap: Bitmap, guide: Rect) => Promise<Blob> = (b, g) => photoToCapture(b as unknown as ImageBitmap, g),
+): Promise<PhotoToSend | null> {
+  const { width, height } = bitmap
+  try {
+    const jpeg = await make(bitmap, guide)
+    return closed() ? null : { jpeg, last: relativeGuide(guide, width, height) }
+  } catch (err) {
+    // A capture that failed after the review closed has nothing left to say it to.
+    if (closed()) return null
+    throw err
   }
 }
