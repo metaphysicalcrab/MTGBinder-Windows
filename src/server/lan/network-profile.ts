@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
-import path from 'node:path'
 import { promisify } from 'node:util'
 import { z } from 'zod'
+import { windowsPowerShell } from '../platform.ts'
 
 /**
  * The network phones reach the PC through, and whether Windows treats it as Public. Windows 11 marks a new Wi-Fi
@@ -86,10 +86,9 @@ export async function windowsNetworkProfile(options: NetworkProfileOptions): Pro
 
 /** Windows' connection profiles, from Windows PowerShell 5.1 by its full path; null when they can't be read. */
 async function connectionProfiles(exec: RunCommand, env: NodeJS.ProcessEnv): Promise<Profile[] | null> {
-  const windows = env.SystemRoot || 'C:\\Windows'
-  const powershell = path.win32.join(windows, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  const [powershell, ...flags] = windowsPowerShell(env)
   try {
-    const output = await exec(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', QUERY])
+    const output = await exec(powershell!, [...flags, '-Command', QUERY])
     const text = output.replace(/^\uFEFF/, '').trim()
     if (!text) return [] // no network at all
     // One network is an object; more are an array.

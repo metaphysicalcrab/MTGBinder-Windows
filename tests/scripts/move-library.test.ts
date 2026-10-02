@@ -140,6 +140,41 @@ describe('moveLibrary (spec §3.4)', () => {
     expect(fs.readdirSync(to).sort()).toEqual(['backups', 'binder.db', 'bulk', 'scans'])
   })
 
+  it('says why in one line when its staging folder is held open, and a rerun clears it once let go', async () => {
+    const dir = scratch()
+    const from = path.join(dir, 'data')
+    const to = path.join(dir, 'Binder')
+    fs.mkdirSync(from)
+    library(from).close()
+    // Antivirus scanning the files just copied, past fs-retry's tries on Windows (elsewhere there's one): the staging
+    // folder, once there, can't be removed. EBUSY, as Windows says it.
+    const realRm = fs.rmSync
+    const rm = vi.spyOn(fs, 'rmSync').mockImplementation((file, options) => {
+      if (path.basename(String(file)) === '.moving' && fs.existsSync(file)) {
+        throw Object.assign(new Error(`EBUSY: resource busy or locked, rmdir '${String(file)}'`), { code: 'EBUSY' })
+      }
+      realRm(file, options)
+    })
+    onTestFinished(() => rm.mockRestore())
+    const copy = vi.spyOn(fs, 'cpSync').mockImplementationOnce(() => {
+      throw new Error("ENOSPC: no space left on device, copyfile 'scans/1.jpg'")
+    })
+    onTestFinished(() => copy.mockRestore())
+    // The copy's failure is the one reported, though its staging folder couldn't be cleared.
+    const failure = await moveLibrary(from, to).catch((err: unknown) => err)
+    expect(failure).toBeInstanceOf(MoveError)
+    expect((failure as MoveError).message).toMatch(/^Couldn't copy the library \(ENOSPC: .+\): nothing was changed\.$/)
+    expect(fs.existsSync(path.join(to, '.moving'))).toBe(true)
+    // A rerun that can't clear it says so in a line too, changing nothing.
+    const again = await moveLibrary(from, to).catch((err: unknown) => err)
+    expect(again).toBeInstanceOf(MoveError)
+    expect((again as MoveError).message).toMatch(/^Couldn't copy the library \(EBUSY: .+\): nothing was changed\.$/)
+    expect(fs.existsSync(path.join(to, 'binder.db'))).toBe(false)
+    rm.mockRestore()
+    expect(await moveLibrary(from, to)).toEqual({ copies: 7, cards: 2, decks: 1, scans: 0, conversations: 0 })
+    expect(fs.readdirSync(to).sort()).toEqual(['backups', 'binder.db', 'bulk', 'scans'])
+  })
+
   it('clears what a killed move left behind', async () => {
     const dir = scratch()
     const from = path.join(dir, 'data')

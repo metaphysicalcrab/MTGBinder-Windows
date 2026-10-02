@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, onTestFinished } from 'vitest'
 import { firstLine, InstallError, step } from '../../scripts/lib/build.ts'
@@ -109,16 +110,22 @@ describe('Binder on Windows (install-win32)', () => {
     expect(listsImage('')).toBe(false)
   })
 
-  it('asks tasklist, by its full path, whether Binder.exe runs, and says no when it can\'t tell', () => {
+  it('asks tasklist, by its full path, whether this user\'s Binder.exe runs, and says no when it can\'t tell', () => {
     const calls: Array<[string, string[]]> = []
     const tasklist = (answer: string) => (file: string, args: string[]) => {
       calls.push([file, args])
       return answer
     }
-    expect(binderRunning(tasklist(running), { SystemRoot: String.raw`D:\Windows` })).toBe(true)
-    expect(calls[0]).toEqual([String.raw`D:\Windows\System32\tasklist.exe`, ['/FI', 'IMAGENAME eq Binder.exe', '/FO', 'CSV', '/NH']])
-    expect(binderRunning(tasklist('INFO: No tasks are running which match the specified criteria.'), {})).toBe(false)
-    expect(calls[1]![0]).toBe(String.raw`C:\Windows\System32\tasklist.exe`)
+    // Only this user's: another account signed in on the PC may have its own Binder running.
+    const env = { SystemRoot: String.raw`D:\Windows`, USERDOMAIN: 'DESKTOP-ABC1', USERNAME: 'josé' }
+    expect(binderRunning(tasklist(running), env)).toBe(true)
+    expect(calls[0]).toEqual([
+      String.raw`D:\Windows\System32\tasklist.exe`,
+      ['/FI', 'IMAGENAME eq Binder.exe', '/FI', String.raw`USERNAME eq DESKTOP-ABC1\josé`, '/FO', 'CSV', '/NH'],
+    ])
+    expect(binderRunning(tasklist('INFO: No tasks are running which match the specified criteria.'), { windir: 'E:\\WIN' })).toBe(false)
+    expect(calls[1]![0]).toBe(String.raw`E:\WIN\System32\tasklist.exe`)
+    expect(calls[1]![1][3]).toBe(`USERNAME eq ${os.userInfo().username}`)
     const missing = () => {
       throw Object.assign(new Error('spawnSync tasklist.exe ENOENT'), { code: 'ENOENT' })
     }

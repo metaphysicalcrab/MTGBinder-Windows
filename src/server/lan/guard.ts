@@ -303,7 +303,7 @@ export function guard(lan: LanGuard | undefined): MiddlewareHandler<AppEnv> {
     // A phone's request through the dev server's proxy comes in on this computer's listener, which runs whether phone
     // access is on or not: its cookie counts only while Binder listens for phones, as on the phones' own listener.
     const on = c.env?.listener === 'lan' || (lan?.listening() ?? false)
-    const device = on ? (lan?.devices.verify(cookie) ?? null) : null
+    const device = on ? (lan?.devices.verify(cookie, { https: isHttps(c) }) ?? null) : null
     let client: Client
     if (policy === 'public') {
       const wait = lan?.limits.public.take(peer)

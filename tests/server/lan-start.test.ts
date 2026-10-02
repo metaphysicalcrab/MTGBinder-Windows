@@ -9,10 +9,14 @@ import { openDb } from '../../src/server/db/index.ts'
 import { setMeta } from '../../src/server/db/meta.ts'
 import { migrate } from '../../src/server/db/migrate.ts'
 import type { LanSummary } from '../../src/server/lan/controller.ts'
+import { lanListenFailure } from '../../src/server/lan/listener.ts'
 import { type BinderOptions, type RunningBinder, startBinder } from '../../src/server/start.ts'
 import type { LanStatus } from '../../src/shared/types.ts'
 import { body, json, makeLanApp, stubScryfall } from '../helpers/app.ts'
 import { tempDir } from '../helpers/tmp.ts'
+
+/** What listening on a port another program has gives. */
+const inUse = Object.assign(new Error('listen EADDRINUSE: address already in use'), { code: 'EADDRINUSE' })
 
 /** A throwaway library, with phone access listening on 127.0.0.1 (so no firewall asks) when it's turned on. */
 function library(): BinderOptions & { lines: string[]; changes: LanSummary[] } {
@@ -103,7 +107,8 @@ describe("the phones' listener (spec §5.10)", () => {
     setMeta(db, 'lan_enabled', '1')
     db.close()
     const binder = await runBinder(options)
-    const failure = `Couldn't listen on port ${port}: another program is using it. Set BINDER_LAN_PORT to use another port`
+    const failure = lanListenFailure(inUse, port)
+    expect(failure).toMatch(new RegExp(`^Couldn't listen on port ${port}: another program is using it\\. Set (a )?BINDER_LAN_PORT `))
     expect(options.lines).toContain(`[phone] ${failure}`)
     expect(binder.lan).toEqual({ enabled: true, available: true, listening: false, urls: [], error: failure })
     expect(options.changes.at(-1)).toEqual(binder.lan)
@@ -148,14 +153,42 @@ describe("the phones' listener (spec §5.10)", () => {
     expect([changes.length, app.lines.filter((line) => line === '[phone] Phone access is off')]).toEqual([2, ['[phone] Phone access is off']])
   })
 
-  it('reads BINDER_LAN_PORT as a port from 1 to 65535, and says so when it is not one', async () => {
+  it('says what to do when its port is taken or refused, as each platform does', () => {
+    const refused = Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })
+    expect(lanListenFailure(inUse, 4322, 'darwin')).toBe(
+      "Couldn't listen on port 4322: another program is using it. Set BINDER_LAN_PORT to use another port",
+    )
+    expect(lanListenFailure(refused, 4323, 'linux', true)).toBe(
+      "Couldn't listen on port 4323 for HTTPS: Binder isn't allowed to use it. Set BINDER_LAN_PORT to use another port",
+    )
+    // On Windows, as the desktop app says of its own port: a variable for the account (an app opened from the Start
+    // menu has no command line), and the ports Windows keeps for itself.
+    expect(lanListenFailure(inUse, 4322, 'win32')).toBe(
+      "Couldn't listen on port 4322: another program is using it. Set a BINDER_LAN_PORT environment variable for your " +
+        'account to another port, then quit Binder and open it again',
+    )
+    expect(lanListenFailure(refused, 4323, 'win32', true)).toBe(
+      "Couldn't listen on port 4323 for HTTPS: Windows won't let Binder use it, and may keep it for Hyper-V, WSL or " +
+        'Docker. In a terminal, `netsh interface ipv4 show excludedportrange protocol=tcp` lists the ports it keeps. ' +
+        'Restarting the PC often frees it; or set a BINDER_LAN_PORT environment variable for your account to a port ' +
+        'outside those ranges, then quit Binder and open it again',
+    )
+    expect(lanListenFailure(Object.assign(new Error('the network is down'), { code: 'ENETDOWN' }), 4322, 'win32')).toBe(
+      "Couldn't listen on port 4322: the network is down",
+    )
+  })
+
+  it('reads BINDER_LAN_PORT as a port from 1 to 65534, HTTPS taking the next one, and says so when it is not one', async () => {
     expect([lanPort({}), lanPort({ BINDER_LAN_PORT: '' }), lanPort({ BINDER_LAN_PORT: ' 5000 ' }), lanPort({ BINDER_LAN: '0' })]).toEqual([
       4322,
       4322,
       5000,
       null,
     ])
-    for (const value of ['abc', '0', '65536', '-1', '4322.5', '1e3']) expect([value, lanPort({ BINDER_LAN_PORT: value })]).toEqual([value, NaN])
+    expect(lanPort({ BINDER_LAN_PORT: '65534' })).toBe(65534)
+    for (const value of ['abc', '0', '65535', '65536', '-1', '4322.5', '1e3']) {
+      expect([value, lanPort({ BINDER_LAN_PORT: value })]).toEqual([value, NaN])
+    }
     const app = makeLanApp({}, { port: lanPort({ BINDER_LAN_PORT: 'abc' }) })
     const status = await body<LanStatus>(await app.local('/api/lan', json({ enabled: true }, 'PUT')))
     expect(status).toMatchObject({
@@ -163,7 +196,7 @@ describe("the phones' listener (spec §5.10)", () => {
       listening: false,
       port: 0,
       httpsPort: 0,
-      error: "Couldn't listen for phones: BINDER_LAN_PORT must be a port number from 1 to 65535",
+      error: "Couldn't listen for phones: BINDER_LAN_PORT must be a port number from 1 to 65534 (HTTPS takes the next one up)",
     })
   })
 

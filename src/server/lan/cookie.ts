@@ -1,10 +1,15 @@
+import type { TLSSocket } from 'node:tls'
 import type { Context } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
+import type { AppEnv } from '../http.ts'
 import { DEVICE_COOKIE_MAX_AGE } from './devices.ts'
 
-/** Whether a request came over HTTPS (the phones' HTTPS listener). */
-export function isHttps(c: Context): boolean {
-  return c.req.url.startsWith('https:')
+/**
+ * Whether a request came over HTTPS (the phones' HTTPS listener): by its connection, not its URL, whose scheme a
+ * request line naming a whole URL (`GET https://…/api/… HTTP/1.1`) sets even on the plain HTTP port.
+ */
+export function isHttps(c: Context<AppEnv>): boolean {
+  return (c.env?.incoming?.socket as TLSSocket | undefined)?.encrypted === true
 }
 
 /**
@@ -15,7 +20,7 @@ export function deviceCookieName(https: boolean): string {
   return https ? '__Host-binder_device' : 'binder_device'
 }
 
-export function readDeviceCookie(c: Context): string | undefined {
+export function readDeviceCookie(c: Context<AppEnv>): string | undefined {
   return getCookie(c, deviceCookieName(isHttps(c)))
 }
 
@@ -24,7 +29,7 @@ export function readDeviceCookie(c: Context): string | undefined {
  * another site carries none), never readable by scripts (HttpOnly), for this host alone (no Domain), and kept for 400
  * days.
  */
-export function setDeviceCookie(c: Context, value: string): void {
+export function setDeviceCookie(c: Context<AppEnv>, value: string): void {
   const https = isHttps(c)
   setCookie(c, deviceCookieName(https), value, {
     httpOnly: true,
@@ -35,7 +40,7 @@ export function setDeviceCookie(c: Context, value: string): void {
   })
 }
 
-export function clearDeviceCookie(c: Context): void {
+export function clearDeviceCookie(c: Context<AppEnv>): void {
   const https = isHttps(c)
   deleteCookie(c, deviceCookieName(https), { httpOnly: true, sameSite: 'Strict', path: '/', secure: https })
 }

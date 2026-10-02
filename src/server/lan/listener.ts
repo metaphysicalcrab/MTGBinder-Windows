@@ -3,6 +3,7 @@ import https from 'node:https'
 import type { Socket } from 'node:net'
 import { serve, type HttpBindings } from '@hono/node-server'
 import type { Listener } from '../http.ts'
+import { windowsKeptPortAdvice } from '../startup.ts'
 
 /** The app's fetch, as a listener calls it: Node's request and response, and which listener it is. */
 export type ListenerFetch = (
@@ -43,27 +44,36 @@ export interface LanListenerOptions {
   platform?: NodeJS.Platform
 }
 
-/** Why the phones' port (with `https`, their HTTPS port) can't be listened on, in a line for the log and Settings. */
+/**
+ * Why the phones' port (with `https`, their HTTPS port) can't be listened on, in a line for the log, Settings and the
+ * tray. On Windows it says what the desktop app says of its own port (electron/messages.ts): BINDER_LAN_PORT as a
+ * variable for the account, since an app opened from the Start menu has no command line to set it on, and, for a port
+ * Windows refuses, how to see the ones it keeps.
+ */
 export function lanListenFailure(
   err: NodeJS.ErrnoException,
   port: number,
   platform = process.platform,
   https = false,
 ): string {
-  const reserved = platform === 'win32' ? ' (Windows may keep it for Hyper-V, WSL or Docker)' : ''
+  const windows = platform === 'win32'
+  const again = 'then quit Binder and open it again'
+  const another = windows
+    ? `Set a BINDER_LAN_PORT environment variable for your account to another port, ${again}`
+    : 'Set BINDER_LAN_PORT to use another port'
+  const refused = windows
+    ? "Windows won't let Binder use it, and may keep it for Hyper-V, WSL or Docker. " +
+      `${windowsKeptPortAdvice('BINDER_LAN_PORT')}, ${again}`
+    : `Binder isn't allowed to use it. ${another}`
   const why =
-    err.code === 'EADDRINUSE'
-      ? 'another program is using it. Set BINDER_LAN_PORT to use another port'
-      : err.code === 'EACCES'
-        ? `Binder isn't allowed to use it${reserved}. Set BINDER_LAN_PORT to use another port`
-        : err.message
+    err.code === 'EADDRINUSE' ? `another program is using it. ${another}` : err.code === 'EACCES' ? refused : err.message
   return `Couldn't listen on port ${port}${https ? ' for HTTPS' : ''}: ${why}`
 }
 
 /**
  * Serves the app on the phones' port with the request marked as the phones' (`listener: 'lan'`), so the guard applies
- * their rules: over HTTP, or over HTTPS with a certificate (spec §5.10). Requests over HTTPS have `https://` URLs,
- * which is how the routes tell them apart (cookie.ts).
+ * their rules: over HTTP, or over HTTPS with a certificate (spec §5.10). Requests over HTTPS come over a TLS
+ * connection, which is how the routes tell them apart (cookie.ts).
  */
 export function createLanListener(options: LanListenerOptions): LanListener {
   const valid = Number.isInteger(options.port) && options.port >= 0 && options.port <= 65535
@@ -93,7 +103,7 @@ export function createLanListener(options: LanListenerOptions): LanListener {
 
   async function start() {
     if (!valid) {
-      error = "Couldn't listen for phones: BINDER_LAN_PORT must be a port number from 1 to 65535"
+      error = "Couldn't listen for phones: BINDER_LAN_PORT must be a port number from 1 to 65534 (HTTPS takes the next one up)"
       return
     }
     try {

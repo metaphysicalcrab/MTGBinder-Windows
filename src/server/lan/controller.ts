@@ -4,6 +4,7 @@ import type { DB } from '../db/index.ts'
 import { getMeta, setMeta } from '../db/meta.ts'
 import { ApiError } from '../http.ts'
 import type { RunTool } from '../owner-only.ts'
+import { computerNoun } from '../platform.ts'
 import { createAddressBook, type AddressBook, type Interfaces } from './addresses.ts'
 import { ensureCertificates, readAuthority, rotateAuthority, type AuthorityInfo, type LanCertificates } from './certs.ts'
 import { createDeviceStore, type DeviceStore } from './devices.ts'
@@ -110,6 +111,8 @@ export function createLanController(options: LanOptions): LanController {
   const now = options.now ?? Date.now
   const off = options.port === null
   const hostname = options.hostname ?? os.hostname()
+  /** What Settings calls this computer: "Mac", "PC", or "computer". */
+  const computer = computerNoun(options.platform)
   let lastUrl: string | null = null
   const addresses = createAddressBook({
     interfaces: options.interfaces,
@@ -120,7 +123,7 @@ export function createLanController(options: LanOptions): LanController {
       if (secure.listening) void renew()
       const url = controller.url()
       if (url !== lastUrl && url !== null) {
-        log(`[phone] This PC's address changed: phones now open ${url} (phones paired at the old one must pair again)`)
+        log(`[phone] This ${computer}'s address changed: phones now open ${url} (phones paired at the old one must pair again)`)
       }
       changed()
     },
@@ -306,7 +309,7 @@ export function createLanController(options: LanOptions): LanController {
       log(
         url
           ? `[phone] Phones on this Wi-Fi can open ${url} (pair them in Settings → Phone access)`
-          : `[phone] Listening for phones on port ${listener.port}, but this PC isn't on a network a phone can reach`,
+          : `[phone] Listening for phones on port ${listener.port}, but this ${computer} isn't on a network a phone can reach`,
       )
       const setup = secure.listening ? setupUrl() : null
       if (setup) log(`[phone] Each phone installs Binder's certificate for HTTPS once, from ${setup}`)
@@ -401,7 +404,7 @@ export function createLanController(options: LanOptions): LanController {
     }),
     async update(change) {
       if (change.address != null && !addresses.list().some((a) => a.address === change.address)) {
-        throw new ApiError(400, 'bad_address', `${change.address} isn't one of this PC's addresses`)
+        throw new ApiError(400, 'bad_address', `${change.address} isn't one of this ${computer}'s addresses`)
       }
       if ((change.enabled || change.https) && off) throw new ApiError(409, 'lan_off', OFF)
       return serially(async () => {
@@ -452,7 +455,8 @@ export function createLanController(options: LanOptions): LanController {
         throw new ApiError(409, 'not_listening', listener.error ?? (off ? OFF : 'Turn on phone access first'))
       }
       if (!url) {
-        throw new ApiError(409, 'no_address', "This PC isn't on a network a phone can reach: connect it to the Wi-Fi first")
+        const why = `This ${computer} isn't on a network a phone can reach: connect it to the Wi-Fi first`
+        throw new ApiError(409, 'no_address', why)
       }
       return pairing.open((key) => `${url}/pair#k=${key}`)
     },

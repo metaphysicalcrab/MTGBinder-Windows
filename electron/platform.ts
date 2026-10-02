@@ -3,6 +3,7 @@
 // platform's choices are checked on any computer; main.ts applies them.
 import path from 'node:path'
 import type { MenuItemConstructorOptions } from 'electron'
+import { computerNoun } from '../src/server/platform.ts'
 import type { LanSummary } from '../src/shared/types.ts'
 
 /**
@@ -96,15 +97,17 @@ const phoneUrl = (lan: LanSummary | null) => (lan?.listening ? (lan.urls[0] ?? n
  * address phones open beneath it while Binder listens for them (and why they can't use HTTPS, when it's on but failed),
  * or why it can't listen, and Phone access… for its settings; then Quit Binder. The phone items wait for the server to
  * be ready (`lan` is what it last said of phone access); the checkbox can't be clicked while BINDER_LAN=0 keeps it off.
+ * The computer is named as Settings names it: this Mac, this PC.
  */
 export function trayMenuTemplate(
+  platform: NodeJS.Platform,
   state: { ready: boolean; lan: LanSummary | null },
   actions: TrayActions,
 ): MenuItemConstructorOptions[] {
   const { ready, lan } = state
   const on = lan?.enabled ?? false
   const url = phoneUrl(lan)
-  const where = url ? `Phones: ${url}` : "Phones: this PC isn't on a network a phone can reach"
+  const where = url ? `Phones: ${url}` : `Phones: this ${computerNoun(platform)} isn't on a network a phone can reach`
   const lines = [...(lan?.listening ? [where] : []), ...(lan?.error ? [lan.error] : [])]
   const available = ready && lan?.available !== false
   return [

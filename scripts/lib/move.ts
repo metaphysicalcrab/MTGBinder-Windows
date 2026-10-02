@@ -120,11 +120,12 @@ export async function moveLibrary(
         'folder aside, and run pnpm move-library again.',
     )
   }
-  // A killed run's staging is cleared; a failed one clears its own, so an untouched library in `to` stays whole.
+  // A killed run's staging is cleared; a failed one clears its own, so an untouched library in `to` stays whole. Both
+  // are tried again while a file just copied there is held open, as below: antivirus scans the 80 MB card data.
   const staging = path.join(to, '.moving')
   const staged = libraryPaths(staging).dbPath
-  fs.rmSync(staging, { recursive: true, force: true })
   try {
+    removeFolder(staging)
     fs.mkdirSync(staging, { recursive: true })
     const db = new Database(source, { readonly: true, fileMustExist: true })
     try {
@@ -141,7 +142,11 @@ export async function moveLibrary(
       if (fs.existsSync(dir)) fs.cpSync(dir, path.join(staging, folder), { recursive: true, preserveTimestamps: true })
     }
   } catch (err) {
-    fs.rmSync(staging, { recursive: true, force: true })
+    try {
+      removeFolder(staging)
+    } catch {
+      // The copy's own failure is the one to report; the next run clears what's left.
+    }
     if (err instanceof MoveError) throw err
     throw new MoveError(`Couldn't copy the library (${err instanceof Error ? err.message : String(err)}): nothing was changed.`)
   }

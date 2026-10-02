@@ -8,6 +8,7 @@ import tls from 'node:tls'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { openDb } from '../../src/server/db/index.ts'
 import { setMeta } from '../../src/server/db/meta.ts'
+import { lanListenFailure } from '../../src/server/lan/listener.ts'
 import type { NetworkProfile } from '../../src/server/lan/network-profile.ts'
 import { type BinderOptions, type RunningBinder, startBinder } from '../../src/server/start.ts'
 import type { ApiErrorBody, LanPairing, LanStatus } from '../../src/shared/types.ts'
@@ -62,6 +63,18 @@ function overHttps(port: number, ca: string, url: string, init: { as?: string } 
     )
     request.on('error', reject)
     request.end()
+  })
+}
+
+/** Sends `request` as it is to 127.0.0.1:`port`, and returns what came back, once the connection closes. */
+function rawHttp(port: number, request: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let text = ''
+    const socket = net.connect(port, '127.0.0.1', () => socket.write(request))
+    socket.setEncoding('utf8')
+    socket.on('data', (chunk: string) => (text += chunk))
+    socket.on('end', () => resolve(text))
+    socket.on('error', reject)
   })
 }
 
@@ -283,6 +296,10 @@ describe('phone access over HTTPS (spec §5.10)', () => {
     // Its HTTP cookie is no use now: HTTP sends it to HTTPS, where it names no phone.
     expect(await error(await app.request('/api/collection/stats', {}, { cookie: plain }))).toEqual([403, 'use_https'])
     expect(await error(await app.request(at('/api/collection/stats'), {}, { ...phone, cookie: plain }))).toEqual([401, 'unpaired'])
+    // Nor its value under HTTPS's name, as anyone who read it off the Wi-Fi could send it: a cookie works only as paired.
+    const sniffed = { ...phone, cookie: plain.replace(/^binder_device=/, '__Host-binder_device=') }
+    expect(await error(await app.request(at('/api/collection/stats'), {}, sniffed))).toEqual([401, 'unpaired'])
+    expect(await body(await app.request(at('/api/lan/me'), {}, sniffed))).toEqual({ client: 'unpaired', https: true })
 
     const window = await body<LanPairing>(await app.local('/api/lan/pairing', { method: 'POST' }))
     expect(window.url).toMatch(new RegExp(`^https://192\\.168\\.1\\.5:${httpsPort}/pair#k=[A-Za-z0-9_-]{22}$`))
@@ -294,6 +311,22 @@ describe('phone access over HTTPS (spec §5.10)', () => {
     const secure = { ...phone, cookie: cookie.split(';')[0]! }
     expect(await body(await app.request(at('/api/lan/me'), {}, secure))).toEqual({ client: 'device', id: 2, name: 'Pixel 8' })
     expect(app.lan.status().devices).toEqual([expect.objectContaining({ id: 2, name: 'Pixel 8', https: true })])
+    // And the other way: with HTTPS off again, its cookie's value names no phone over HTTP, where it would go in clear.
+    await app.lan.update({ https: false })
+    const overHttp = { cookie: secure.cookie.replace(/^__Host-binder_device=/, 'binder_device=') }
+    expect(await error(await app.request('/api/collection/stats', {}, overHttp))).toEqual([401, 'unpaired'])
+  })
+
+  it('takes a request on the HTTP port as HTTP, whatever URL its request line names', async () => {
+    const app = makeLanApp()
+    const { port, httpsPort } = await withHttps(app)
+    // A whole https:// URL in the request line, which no browser sends, doesn't make plain HTTP into HTTPS.
+    const answer = await rawHttp(
+      port,
+      `GET https://192.168.1.5:${httpsPort}/api/collection/stats HTTP/1.1\r\nHost: 192.168.1.5:${port}\r\nConnection: close\r\n\r\n`,
+    )
+    expect(answer).toMatch(/^HTTP\/1\.1 403 /)
+    expect(answer).toContain('"code":"use_https"')
   })
 
   it('keeps a phone paired over HTTP working over HTTP while HTTPS is off', async () => {
@@ -311,7 +344,8 @@ describe('phone access over HTTPS (spec §5.10)', () => {
     const taken = await takenPortAboveAFreeOne()
     const app = makeLanApp({}, { port: taken - 1 })
     const status = await withHttps(app)
-    const failure = `Couldn't listen on port ${taken} for HTTPS: another program is using it. Set BINDER_LAN_PORT to use another port`
+    const failure = lanListenFailure(Object.assign(new Error('in use'), { code: 'EADDRINUSE' }), taken, process.platform, true)
+    expect(failure).toMatch(new RegExp(`^Couldn't listen on port ${taken} for HTTPS: another program is using it\\. `))
     expect(status).toMatchObject({ listening: true, https: true, error: failure, url: `http://192.168.1.5:${taken - 1}` })
     expect(app.lan.summary()).toMatchObject({
       listening: true,

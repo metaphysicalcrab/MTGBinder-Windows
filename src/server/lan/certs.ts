@@ -1,13 +1,17 @@
 import 'reflect-metadata' // @peculiar/x509 needs the polyfill, loaded before it
 import * as x509 from '@peculiar/x509'
-import { execFile } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
-import { promisify } from 'node:util'
-import { renameWithRetryAsync, retryAsync } from '../fs-retry.ts'
+import {
+  ownerOnlyOnWindowsAsync,
+  removeOwnerOnlyLeftovers,
+  runToolAsync,
+  writeOwnerOnlyAsync,
+  type RunToolAsync,
+} from '../owner-only.ts'
 
 /**
  * Phone access over HTTPS: Binder's own certificate authority, which the owner installs on the phone once, and the
@@ -67,11 +71,7 @@ export interface CertificateOptions {
   run?: RunToolAsync
 }
 
-/**
- * Runs one of Windows' tools and returns what it printed, now or later: owner-only.ts's RunTool, which tests pass, or
- * (by default) without blocking, since certificates are made again while Binder serves (a new address, a renewal).
- */
-export type RunToolAsync = (command: string, args: string[]) => string | Promise<string>
+export type { RunToolAsync } from '../owner-only.ts'
 
 /** The certificate authority, as the phone installs it and the setup page shows it. */
 export interface AuthorityInfo {
@@ -155,7 +155,8 @@ interface Names {
 async function certificates(options: CertificateOptions, rotate: boolean): Promise<LanCertificates> {
   const { dir, now = new Date() } = options
   await fs.promises.mkdir(dir, { recursive: true, mode: 0o700 })
-  removeLeftovers(dir)
+  // Calls in this process don't overlap (oneAtATime), so a copy of its own is one a failed write left.
+  removeOwnerOnlyLeftovers(dir, [CA_CERT, CA_KEY, LEAF_CERT, LEAF_KEY])
   let ca = rotate ? null : loadAuthority(dir, now)
   let authority: LanCertificates['authority'] = 'kept'
   if (!ca) {
@@ -484,96 +485,17 @@ function oneAtATime<T>(dir: string, task: () => Promise<T>): Promise<T> {
   return result
 }
 
-const execFileAsync = promisify(execFile)
-
-/** How long whoami or icacls may take: one that hangs leaves the file with its folder's access list, logged. */
-const TOOL_TIMEOUT_MS = 30_000
-
-/** Windows' tools, run without blocking Binder while they do. */
-const runToolAsync: RunToolAsync = async (command, args) =>
-  (await execFileAsync(command, args, { encoding: 'utf8', windowsHide: true, timeout: TOOL_TIMEOUT_MS })).stdout
-
-/** Windows' own tools, by full path, so a program of the same name elsewhere on the PATH is never run instead. */
-const windowsTool = (name: string) =>
-  path.win32.join(process.env.SystemRoot ?? process.env.windir ?? 'C:\\Windows', 'System32', name)
-
-/** The current user's security identifier, as whoami told each way of running it: asked once, not for every file. */
-const userSids = new WeakMap<RunToolAsync, string>()
+/** Each way of running Windows' tools, making files private with the user's SID it found: asked once, not per file. */
+const ownerOnly = new WeakMap<RunToolAsync, (file: string) => Promise<void>>()
 
 /**
- * On Windows, makes `file` readable and writable by the current user alone, as owner-only.ts does for the API key and
- * the devices' secret: its inherited entries are removed, and the user, by their security identifier, given full
- * control. Here without blocking, as certificates are made again while Binder serves.
- */
-async function ownerOnlyOnWindows(file: string, run: RunToolAsync): Promise<void> {
-  let sid = userSids.get(run)
-  if (!sid) {
-    // `whoami /user /fo csv /nh` prints `"pc\name","S-1-5-21-…"`.
-    const printed = await run(windowsTool('whoami.exe'), ['/user', '/fo', 'csv', '/nh'])
-    sid = /"(S-1-[\d-]+)"\s*$/.exec(printed.trim())?.[1]
-    if (!sid) throw new Error("whoami didn't say who the current user is")
-    userSids.set(run, sid)
-  }
-  await run(windowsTool('icacls.exe'), [file, '/inheritance:r', '/grant:r', `*${sid}:F`])
-}
-
-/**
- * Writes a file only its owner can read, as owner-only.ts's writeOwnerOnly does but without blocking: through a
- * temporary copy (`<file>.<pid>.tmp`) renamed over it, so a crash never leaves half a key or certificate; mode 600, and
- * on Windows an access list with the current user alone, set while the copy is still empty (best effort: when it can't
- * be, the reason is logged). A file another program holds open (antivirus, the indexer) is waited for, as Binder serves.
+ * Writes a file only its owner can read (owner-only.ts), without blocking Binder as it serves: mode 600, and on Windows
+ * an access list with the current user alone, set while the copy is still empty (best effort: when it can't be, the
+ * reason is logged).
  */
 async function writePrivate(file: string, contents: string, options: CertificateOptions): Promise<void> {
   const { platform = process.platform, run = runToolAsync } = options
-  const temp = `${file}.${process.pid}.tmp`
-  try {
-    if (platform === 'win32') {
-      await fs.promises.writeFile(temp, '', { flag: 'wx' })
-      try {
-        await ownerOnlyOnWindows(temp, run)
-      } catch (err) {
-        const reason = err instanceof Error ? err.message : String(err)
-        console.error(`[phone] Couldn't make ${temp} private to this user: ${reason}`)
-      }
-      await fs.promises.writeFile(temp, contents)
-      // Windows won't rename over a read-only file. Binder's own saves leave none; one made so by hand is cleared.
-      if (fs.existsSync(file)) await fs.promises.chmod(file, 0o666)
-    } else {
-      await fs.promises.writeFile(temp, contents, { flag: 'wx', mode: 0o600 })
-      await fs.promises.chmod(temp, 0o600) // exactly 600, whatever the umask took away
-    }
-    await renameWithRetryAsync(temp, file, { platform })
-  } catch (err) {
-    // It may hold a key. When it can't be removed, the next call does (removeLeftovers): the write's failure is the one
-    // to report.
-    await retryAsync(() => fs.promises.rm(temp, { force: true }), { platform }).catch(() => {})
-    throw err
-  }
-}
-
-/** Whether `pid` is another process that is still running: a signal 0 reaches it, or it exists but isn't ours. */
-function otherProcessRunning(pid: number): boolean {
-  if (pid <= 0 || pid === process.pid) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === 'EPERM'
-  }
-}
-
-/**
- * Removes the temporary copies writes leave when a crash stops them between writing and renaming (`<file>.<pid>.tmp`),
- * which can hold a key; one another running Binder is still writing is left to it. Calls in this process don't
- * overlap, so none of its own is in progress. Best effort.
- */
-function removeLeftovers(dir: string): void {
-  try {
-    for (const entry of fs.readdirSync(dir)) {
-      const pid = /^(?:ca|ca-key|leaf|leaf-key)\.pem\.(\d+)\.tmp$/.exec(entry)?.[1]
-      if (pid !== undefined && !otherProcessRunning(Number(pid))) fs.rmSync(path.join(dir, entry), { force: true })
-    }
-  } catch {
-    // The folder can't be read: the write that follows says why.
-  }
+  let restrict = ownerOnly.get(run)
+  if (!restrict) ownerOnly.set(run, (restrict = ownerOnlyOnWindowsAsync(run, '[phone]')))
+  await writeOwnerOnlyAsync(file, contents, { platform, ownerOnly: restrict })
 }

@@ -29,6 +29,19 @@ export function listenFailure(err: NodeJS.ErrnoException, port: number, platform
   return `Couldn't start the server on port ${port}: ${err.message}`
 }
 
+/**
+ * What to do on Windows about a port it won't let Binder use, most often one it keeps for Hyper-V, WSL or Docker: how
+ * to see those, and the setting (`PORT`, or `BINDER_LAN_PORT` for phones) as an environment variable for the user's
+ * account, which is how the desktop app, opened from the Start menu, gets one. The desktop app's dialog says it of its
+ * own port, and the phones' listener of theirs; each ends it with what to do next.
+ */
+export function windowsKeptPortAdvice(variable: string): string {
+  return (
+    'In a terminal, `netsh interface ipv4 show excludedportrange protocol=tcp` lists the ports it keeps. Restarting ' +
+    `the PC often frees it; or set a ${variable} environment variable for your account to a port outside those ranges`
+  )
+}
+
 /** Whether two paths name one folder: on Windows and the Mac, whose file systems ignore letter case, in any case. */
 function sameFolder(a: string, b: string, platform: NodeJS.Platform): boolean {
   const [x, y] = [path.resolve(a), path.resolve(b)]

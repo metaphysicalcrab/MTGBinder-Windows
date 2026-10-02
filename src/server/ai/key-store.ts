@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { ownerOnlyOnWindows, runTool, writeOwnerOnly, type RunTool } from '../owner-only.ts'
+import { ownerOnlyOnWindows, removeOwnerOnlyLeftovers, runTool, writeOwnerOnly, type RunTool } from '../owner-only.ts'
 
 /** A key line: its prefix (leading space and any `export `), then the value. */
 const KEY_LINE = /^(\s*(?:export\s+)?)ANTHROPIC_API_KEY\s*=\s*(.*?)\s*$/
@@ -57,35 +57,8 @@ function readText(file: string): string {
   return bytes.toString('utf8')
 }
 
-/** Whether `pid` is another process that is still running: a signal 0 reaches it, or it exists but isn't ours. */
-function otherProcessRunning(pid: number): boolean {
-  if (pid <= 0 || pid === process.pid) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === 'EPERM'
-  }
-}
-
-/**
- * Removes the temporary copies saves leave when a crash or kill stops them between writing and renaming
- * (`<.env>.<pid>.tmp`): they hold the key. One whose process is still running is that process's save in progress,
- * and is left to it. Best effort.
- */
-function removeLeftovers(file: string): void {
-  const name = path.basename(file)
-  try {
-    for (const entry of fs.readdirSync(path.dirname(file))) {
-      const pid = entry.startsWith(`${name}.`) ? /^\.(\d+)\.tmp$/.exec(entry.slice(name.length))?.[1] : undefined
-      if (pid !== undefined && !otherProcessRunning(Number(pid))) {
-        fs.rmSync(path.join(path.dirname(file), entry), { force: true })
-      }
-    }
-  } catch {
-    // The folder can't be read: nothing to clean.
-  }
-}
+/** Removes the temporary copies (`<.env>.<pid>.tmp`) left by saves a crash or kill stopped: they hold the key. */
+const removeLeftovers = (file: string) => removeOwnerOnlyLeftovers(path.dirname(file), [path.basename(file)])
 
 export function createKeyStore(envPath: string, options: KeyStoreOptions = {}): KeyStore {
   const windows = (options.platform ?? process.platform) === 'win32'
