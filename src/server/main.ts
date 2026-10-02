@@ -1,6 +1,6 @@
 import { APP_LIBRARY_DIR, DATA_DIR, ENV_PATH, HOST, OCR_BINARY, OCR_SOURCE, PORT, WEB_DIST_DIR } from './config.ts'
-import { startBinder, StartupError } from './start.ts'
-import { appLibraryNote, portProblem } from './startup.ts'
+import { type RunningBinder, startBinder, StartupError } from './start.ts'
+import { appLibraryNote, portProblem, stopOnSignals } from './startup.ts'
 
 // Binder from the terminal (`pnpm start`): the library in data/ (or BINDER_DATA_DIR), the key in the project's .env.
 
@@ -14,8 +14,9 @@ if (badPort) {
 const note = appLibraryNote(DATA_DIR, APP_LIBRARY_DIR)
 if (note) console.log(note)
 
+let binder: RunningBinder
 try {
-  await startBinder({
+  binder = await startBinder({
     dataDir: DATA_DIR,
     envPath: ENV_PATH,
     webDistDir: WEB_DIST_DIR,
@@ -30,3 +31,5 @@ try {
   console.error(err.message)
   process.exit(1)
 }
+// Ctrl+C (and on Windows, Ctrl+Break or closing the console window) closes the library before Binder exits.
+stopOnSignals(binder)

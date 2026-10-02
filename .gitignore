@@ -1,6 +1,6 @@
-# Dependencies and build output (build/: Binder.app's icons, which pnpm icons draws; release/: Binder.app, which
-# pnpm app builds)
-node_modules/
+# Dependencies and build output (build/: the desktop app's icons, which pnpm icons draws; release/: the app, which
+# pnpm app builds). node_modules without a slash: a worktree's is often a link to the main checkout's.
+node_modules
 dist/
 bin/
 build/
@@ -13,8 +13,17 @@ data/
 .env
 .env.*
 
-# Scratch workspaces (and the worktrees Claude Code makes), logs, and OS files
+# Scratch workspaces (and the worktrees Claude Code makes), logs, and OS files: the Mac's and Windows'
 .superpowers/
 .claude/worktrees/
 *.log
 .DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# Private keys and certificates (phone access over HTTPS keeps its own in the library folder): never committed.
+*.pem
+*.key
+*.pfx

@@ -1,13 +1,14 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
-import { describe, expect, it, onTestFinished } from 'vitest'
+import Database from 'better-sqlite3'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { openDb } from '../../src/server/db/index.ts'
 import { migrate } from '../../src/server/db/migrate.ts'
 import { getMeta, setMeta } from '../../src/server/db/meta.ts'
 import { compileFilter } from '../../src/server/search/compile.ts'
 import { parseSearch } from '../../src/shared/search/parse.ts'
 import { createTestDb } from '../helpers/db.ts'
+import { tempDir } from '../helpers/tmp.ts'
 
 describe('database', () => {
   it('creates every table from the spec', () => {
@@ -39,8 +40,7 @@ describe('database', () => {
   })
 
   it('creates parent directories and sets the pragmas for file databases', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'binder-db-'))
-    onTestFinished(() => fs.rmSync(dir, { recursive: true, force: true }))
+    const dir = tempDir('binder-db-')
     const db = openDb(path.join(dir, 'nested', 'test.db'))
     try {
       expect(db.pragma('journal_mode', { simple: true })).toBe('wal')
@@ -53,9 +53,20 @@ describe('database', () => {
     }
   })
 
+  it("closes a file it can't open as a library, so it can be replaced or deleted (Windows won't while it's open)", () => {
+    const dir = tempDir('binder-db-')
+    const file = path.join(dir, 'binder.db')
+    fs.writeFileSync(file, 'this is not a database')
+    const close = vi.spyOn(Database.prototype, 'close')
+    onTestFinished(() => close.mockRestore())
+    expect(() => openDb(file)).toThrow('file is not a database')
+    expect(close).toHaveBeenCalledOnce()
+    fs.rmSync(file)
+  })
+
+  // Over 100 MB written and folded back in: slow where antivirus checks each write (Windows), so it gets 30 s.
   it('keeps at most 64 MB of the write-ahead log on disk once a large write is checkpointed', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'binder-db-'))
-    onTestFinished(() => fs.rmSync(dir, { recursive: true, force: true }))
+    const dir = tempDir('binder-db-')
     const file = path.join(dir, 'test.db')
     const db = openDb(file)
     onTestFinished(() => {
@@ -72,7 +83,7 @@ describe('database', () => {
     // The next write starts the log over, and gives back what's past the limit.
     db.exec('DELETE FROM big')
     expect(fs.statSync(`${file}-wal`).size).toBeLessThanOrEqual(64 * MB)
-  })
+  }, 30_000)
 
   it("registers the search compiler's SQL functions, so a compiled filter runs on any freshly opened database", () => {
     const db = createTestDb() // through openDb, never through the search routes

@@ -75,13 +75,17 @@ export function collectionRoutes(deps: { db: DB }): Hono {
     return c.json(addCopies(db, items))
   })
 
+  // `?excel=1` starts the file with a byte order mark: Excel on Windows then reads it as UTF-8, so names like
+  // Lim-Dûl's Vault and Séance come out right, where it would otherwise read it in Windows' own code page. Without it,
+  // the file is as other apps' imports expect. Binder's own import takes either.
   routes.get('/export.csv', (c) => {
     const lines = [csvLine(['Count', 'Name', 'Edition', 'Collector Number', 'Foil'])]
     for (const row of exportRows(db)) {
       lines.push(csvLine([row.quantity, row.name, row.setCode, row.collectorNumber, FOIL_COLUMN[row.finish]]))
     }
     const date = localDate(new Date())
-    return c.body(`${lines.join('\r\n')}\r\n`, 200, {
+    const bom = c.req.query('excel') === '1' ? '\uFEFF' : ''
+    return c.body(`${bom}${lines.join('\r\n')}\r\n`, 200, {
       'content-type': 'text/csv; charset=utf-8',
       'content-disposition': `attachment; filename="binder-collection-${date}.csv"`,
     })

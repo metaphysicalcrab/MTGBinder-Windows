@@ -177,6 +177,9 @@ describe('answers', () => {
     const res = await app.request(`/api/ai/threads/${id}/messages`, json({ text: 'Hi' }))
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toMatch(/^text\/event-stream/)
+    // The headers every answer gets don't hold the stream back, nor replace its own caching rule.
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(res.headers.get('cache-control')).toBe('no-cache')
     const received = await events(res)
     expect(received[0]).toEqual({ type: 'item', item: { kind: 'user', text: 'Hi', deck: null } })
     expect(received.filter((e) => e.type === 'delta').map((e) => (e as { text: string }).text).join('')).toBe('Hello there.')

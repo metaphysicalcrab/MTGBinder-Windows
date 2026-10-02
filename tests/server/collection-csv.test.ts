@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { CsvError, csvLine, parseCsv } from '../../src/server/collection/csv.ts'
+import { QUICK_MS } from '../helpers/timing.ts'
 
 const cells = (text: string) => parseCsv(text).map((r) => r.cells)
 
@@ -70,7 +71,7 @@ describe('parseCsv', () => {
     const cell = 'a"'.repeat(200_000)
     const start = performance.now()
     expect(cells(cell)).toEqual([[cell]])
-    expect(performance.now() - start).toBeLessThan(500)
+    expect(performance.now() - start).toBeLessThan(QUICK_MS)
   })
 
   it('returns nothing for empty text', () => {

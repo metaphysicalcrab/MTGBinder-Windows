@@ -1,5 +1,4 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
@@ -7,17 +6,18 @@ import { backupIfDue, backupNow, KEEP_BACKUPS, KEEP_EXTRA_BACKUPS, KEEP_UPGRADE_
 import { openDb, openFailureLine, openLibrary, type DB } from '../../src/server/db/index.ts'
 import { getMeta, setMeta } from '../../src/server/db/meta.ts'
 import { migrate, UpgradeBackupError, type MigrateOptions } from '../../src/server/db/migrate.ts'
+import { tempDir } from '../helpers/tmp.ts'
 
 let tmp: string
 let db: DB
 beforeEach(() => {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'binder-backup-'))
+  // The folder is removed after every database in it is closed, this one and those a test opens (see tempDir).
+  tmp = tempDir('binder-backup-')
   db = openDb(path.join(tmp, 'binder.db'))
+  onTestFinished(() => {
+    if (db.open) db.close()
+  })
   db.prepare("INSERT INTO decks (name, format, status, created_at, updated_at) VALUES ('Burn', 'modern', 'built', 't', 't')").run()
-})
-afterEach(() => {
-  db.close()
-  fs.rmSync(tmp, { recursive: true, force: true })
 })
 
 const dir = () => path.join(tmp, 'backups')

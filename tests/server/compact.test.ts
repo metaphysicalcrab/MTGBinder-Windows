@@ -1,18 +1,20 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
+import type Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { autocomplete, insertCardRows, rebuildCardNames } from '../../src/server/cards/repo.ts'
-import { compactLibrary, librarySize } from '../../src/server/compact.ts'
+import { CompactUnfinishedError, compactLibrary, librarySize } from '../../src/server/compact.ts'
 import { openDb, type DB } from '../../src/server/db/index.ts'
+import { compactFailure } from '../../src/server/settings-routes.ts'
 import type { ApiErrorBody, LibrarySize } from '../../src/shared/types.ts'
 import { body, makeApp } from '../helpers/app.ts'
 import { fixtureRows } from '../helpers/db.ts'
+import { tempDir } from '../helpers/tmp.ts'
 
 let tmp: string
 let db: DB
 beforeEach(() => {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'binder-compact-'))
+  tmp = tempDir('binder-compact-')
   db = openDb(path.join(tmp, 'binder.db'))
   insertCardRows(db, 'cards', fixtureRows())
   rebuildCardNames(db)
@@ -24,10 +26,8 @@ beforeEach(() => {
   })()
   db.exec('DROP TABLE junk')
 })
-afterEach(() => {
-  db.close()
-  fs.rmSync(tmp, { recursive: true, force: true })
-})
+// Closed before its folder is removed (see tempDir).
+afterEach(() => db.close())
 
 const backups = () => path.join(tmp, 'backups')
 const ftsIntact = () => {
@@ -77,5 +77,35 @@ describe('the library routes', () => {
       message: "Couldn't compact the library: ENOSPC: no space left on device. Free up disk space and try again; the library is unchanged.",
     })
     expect((await makeApp({ db }).request('/api/settings/library/compact', { method: 'POST' })).status).toBe(404)
+  })
+
+  it('says what to do by the cause: a file another program holds, or a full disk where temporary files go', () => {
+    const failure = (code: string, message: string) => compactFailure(Object.assign(new Error(message), { code }))
+    const inUse = 'A file in the library folder is in use by another program (antivirus, OneDrive, or another Binder); try again in a moment'
+    for (const code of ['EPERM', 'EBUSY', 'EACCES', 'SQLITE_BUSY']) {
+      expect(failure(code, `${code}: the file is held.`)).toBe(`Couldn't compact the library: ${code}: the file is held. ${inUse}; the library is unchanged.`)
+    }
+    expect(failure('SQLITE_FULL', 'database or disk is full')).toBe(
+      "Couldn't compact the library: database or disk is full. Free up disk space, on the library's drive and on the one that holds temporary files, and try again; the library is unchanged.",
+    )
+    expect(failure('ENOSPC', 'ENOSPC: no space left on device')).toBe(
+      "Couldn't compact the library: ENOSPC: no space left on device. Free up disk space and try again; the library is unchanged.",
+    )
+  })
+
+  it("says when the library was compacted but what follows didn't finish, so compacting again finishes it", async () => {
+    const pragma = db.pragma.bind(db)
+    const failing = vi.spyOn(db, 'pragma').mockImplementation(((source: string, options?: Database.PragmaOptions) => {
+      if (source === 'wal_checkpoint(TRUNCATE)') throw Object.assign(new Error('disk I/O error'), { code: 'SQLITE_IOERR_TRUNCATE' })
+      return pragma(source, options)
+    }) as typeof db.pragma)
+    onTestFinished(() => failing.mockRestore())
+    expect(() => compactLibrary(db, backups())).toThrow(CompactUnfinishedError)
+    expect(librarySize(db).freeBytes).toBeLessThan(64 * 1024) // VACUUM did its part
+    const failed = await makeApp({ db, backupDir: backups() }).request('/api/settings/library/compact', { method: 'POST' })
+    expect((await body<ApiErrorBody>(failed)).error).toEqual({
+      code: 'compact_failed',
+      message: "Couldn't finish compacting the library: disk I/O error. It was compacted; compact it again to finish.",
+    })
   })
 })

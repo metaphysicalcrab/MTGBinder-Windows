@@ -1,10 +1,12 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, onTestFinished } from 'vitest'
 import { buildOcrHelper, createOcrClient, type OcrClient } from '../../src/server/scanner/ocr-client.ts'
 
-const FAKE = [process.execPath, new URL('../helpers/fake-ocr.ts', import.meta.url).pathname]
+// A file path, not the URL's (which is `/C:/…` on Windows, with any space in it as %20).
+const FAKE = [process.execPath, fileURLToPath(new URL('../helpers/fake-ocr.ts', import.meta.url))]
 const text = async (client: OcrClient, request: string) => (await client.recognize(request)).lines[0]?.text ?? ''
 const pid = (answer: string) => answer.split(':')[0]
 const alive = (id: string | undefined) => {
@@ -20,18 +22,21 @@ let client: OcrClient | undefined
 afterEach(() => client?.close())
 
 describe('createOcrClient', () => {
+  // The budgets leave room for a slow start: a new process on Windows, which antivirus checks first, can take half a
+  // second before it reads its first request.
   it("sends one image at a time, so waiting doesn't count against an image's time", async () => {
-    client = createOcrClient({ command: FAKE, timeoutMs: 300 })
-    // The helper starts first, so its starting up doesn't count against the first image's 300 ms.
+    client = createOcrClient({ command: FAKE, timeoutMs: 1000 })
+    // The helper starts first, so its starting up doesn't count against the first image's second. Three images of
+    // 0.6 s each would pass it if their waiting counted.
     const warm = pid(await text(client, 'warm'))
     const order: string[] = []
-    const read = (name: string) => client!.recognize(`delay:200:${name}`).then((r) => (order.push(name), r))
+    const read = (name: string) => client!.recognize(`delay:600:${name}`).then((r) => (order.push(name), r))
     const answers = await Promise.all([read('first'), read('second'), read('third')])
     expect(answers.map((a) => a.lines[0]?.text.split(':')[1])).toEqual(['first', 'second', 'third'])
     expect(order).toEqual(['first', 'second', 'third'])
     expect(answers.map((a) => pid(a.lines[0]!.text))).toEqual([warm, warm, warm])
     expect(answers[0]).toMatchObject({ width: 100, height: 140 })
-  })
+  }, 10_000)
 
   it("fails a request with the helper's error", async () => {
     client = createOcrClient({ command: FAKE })
@@ -48,14 +53,14 @@ describe('createOcrClient', () => {
   })
 
   it('gives up on an image after the timeout, kills the helper, and sends the next one to a new helper (spec §5.1.4)', async () => {
-    client = createOcrClient({ command: FAKE, timeoutMs: 500 })
+    client = createOcrClient({ command: FAKE, timeoutMs: 2000 })
     const before = pid(await text(client, 'one'))
     const hung = client.recognize('hang')
     const next = text(client, 'two')
-    await expect(hung).rejects.toThrow('OCR took longer than 0.5 s')
+    await expect(hung).rejects.toThrow('OCR took longer than 2 s')
     expect(pid(await next)).not.toBe(before)
     await expect.poll(() => alive(before)).toBe(false)
-  })
+  }, 10_000)
 
   it("fails an image at once when the helper couldn't read the request", async () => {
     client = createOcrClient({ command: FAKE, timeoutMs: 2000 })

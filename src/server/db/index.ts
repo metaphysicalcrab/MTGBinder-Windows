@@ -9,7 +9,8 @@ export type DB = Database.Database
 /**
  * Opens (creating if needed) the SQLite database, applies pragmas, registers the search compiler's SQL functions, and
  * runs pending migrations. Pass `backupDir` when opening the owner's library, so an existing database is copied there
- * before a migration upgrades it (see migrate).
+ * before a migration upgrades it (see migrate). When any of that fails, the connection is closed before the error is
+ * thrown: on Windows an open database's files can't be moved, replaced or deleted until it is.
  */
 export function openDb(
   file: string,
@@ -17,16 +18,21 @@ export function openDb(
 ): DB {
   if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true })
   const db = new Database(file)
-  db.pragma('journal_mode = WAL')
-  db.pragma('synchronous = NORMAL')
-  db.pragma('foreign_keys = ON')
-  db.pragma('busy_timeout = 5000')
-  // A card-data refresh leaves the write-ahead log at full size: keep at most 64 MB of it on disk after a checkpoint.
-  db.pragma('journal_size_limit = 67108864')
-  // Read the ~450 MB card table through memory mapping: searches that scan it run 30–60% faster.
-  db.pragma('mmap_size = 1073741824')
-  registerSearchFunctions(db)
-  migrate(db, options)
+  try {
+    db.pragma('journal_mode = WAL')
+    db.pragma('synchronous = NORMAL')
+    db.pragma('foreign_keys = ON')
+    db.pragma('busy_timeout = 5000')
+    // A card-data refresh leaves the write-ahead log at full size: keep at most 64 MB of it on disk after a checkpoint.
+    db.pragma('journal_size_limit = 67108864')
+    // Read the ~450 MB card table through memory mapping: searches that scan it run 30–60% faster.
+    db.pragma('mmap_size = 1073741824')
+    registerSearchFunctions(db)
+    migrate(db, options)
+  } catch (err) {
+    db.close()
+    throw err
+  }
   return db
 }
 
