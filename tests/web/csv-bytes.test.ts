@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decodeCsvBytes, excelCsvBytes } from '../../src/web/lib/csv-bytes.ts'
+import { decodeCsvBytes } from '../../src/web/lib/csv-bytes.ts'
 
 const CSV = 'Count,Name\r\n1,Lim-Dûl the Necromancer\r\n2,Ifh-Bíff Efreet\r\n'
 
@@ -52,15 +52,5 @@ describe('decodeCsvBytes', () => {
 
   it('reads an empty file as empty', () => {
     expect(decodeCsvBytes(new Uint8Array())).toBe('')
-  })
-})
-
-describe('excelCsvBytes', () => {
-  it('is the text in UTF-8 after a byte order mark, which it adds once', () => {
-    const bytes = excelCsvBytes(CSV)
-    expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf])
-    expect(bytes.slice(3)).toEqual(utf8(CSV))
-    expect(excelCsvBytes(`\uFEFF${CSV}`)).toEqual(bytes)
-    expect(decodeCsvBytes(bytes)).toBe(CSV)
   })
 })

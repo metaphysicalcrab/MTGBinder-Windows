@@ -6,31 +6,14 @@ import { CardDataNotice } from '../components/library/CardDataNotice.tsx'
 import { ImportPanel } from '../components/library/ImportPanel.tsx'
 import { apiGet } from '../lib/api.ts'
 import { useOnOverlayEntry } from '../lib/back-to-close.ts'
-import { excelCsvBytes } from '../lib/csv-bytes.ts'
 import { formatDate, formatUsd } from '../lib/format.ts'
 import { IS_WINDOWS } from '../lib/platform.ts'
 import { readSearchState, writeSearchState } from '../lib/search-state.ts'
-import { useToast } from '../lib/toast.tsx'
 import { SearchView } from './SearchPage.tsx'
 
 const action = 'rounded-md border border-stone-700 px-3 py-1.5 text-sm text-stone-200 hover:bg-stone-800 pointer-coarse:py-2.5'
 
 const EXPORT_URL = '/api/collection/export.csv'
-
-/**
- * Saves the library's CSV marked as UTF-8 (a byte order mark first), which Excel on Windows needs: it reads a CSV
- * without one as Windows-1252, garbling accented names. The file keeps the name the server gives the export.
- */
-async function saveExportForExcel(): Promise<void> {
-  const res = await fetch(EXPORT_URL)
-  if (!res.ok) throw new Error(`The server answered ${res.status}.`)
-  const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? 'binder-collection.csv'
-  const url = URL.createObjectURL(new Blob([excelCsvBytes(await res.text())], { type: 'text/csv;charset=utf-8' }))
-  const link = Object.assign(document.createElement('a'), { href: url, download: name })
-  link.click()
-  // The download has begun with the click; the URL's memory goes a little later.
-  setTimeout(() => URL.revokeObjectURL(url), 60_000)
-}
 
 /**
  * My library, where Binder opens: totals, CSV import and export, and search locked to the collection (spec §5.2, §5.3).
@@ -40,7 +23,6 @@ export function LibraryPage() {
   // Getting started's Import a CSV (on this page) and other pages' links open the page with the import panel showing.
   const { pathname, search, state } = useLocation()
   const navigate = useNavigate()
-  const toast = useToast()
   const openedImporting = (state as { importing?: boolean } | null)?.importing === true
   const [importing, setImporting] = useState(openedImporting)
   // Once read, the history entry drops that state (keeping the path and the search), so a reload or Back doesn't open
@@ -76,13 +58,16 @@ export function LibraryPage() {
             Export CSV
           </a>
           {IS_WINDOWS && (
-            <button
-              onClick={() => saveExportForExcel().catch((err: Error) => toast.error(`Couldn't export the library. ${err.message}`))}
+            // The same CSV, marked as UTF-8 (a byte order mark first): Excel on Windows reads a CSV without one in
+            // Windows' own code page, garbling accented names.
+            <a
+              href={`${EXPORT_URL}?excel=1`}
+              download
               title="The same CSV, marked as UTF-8 so Excel shows accented names as they are"
               className={action}
             >
               Export for Excel
-            </button>
+            </a>
           )}
         </div>
       </div>

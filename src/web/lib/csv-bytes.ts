@@ -1,6 +1,6 @@
 /**
  * A CSV file's text from its bytes (spec §5.3). A byte order mark names the encoding: UTF-8 (Excel's "CSV UTF-8", and
- * Binder's own export for Excel), or UTF-16 (Excel's "Unicode Text"). Without one the file is read as UTF-8 (every
+ * Binder's own Export for Excel), or UTF-16 (Excel's "Unicode Text"). Without one the file is read as UTF-8 (every
  * other app's export) unless it mostly isn't: then as Windows-1252, what Excel on Windows saves a plain "CSV (Comma
  * delimited)" in. Read as UTF-8, that file's accented names (Lim-Dûl, Ifh-Bíff) would come out as replacement
  * characters. A UTF-8 file with a stray byte that isn't (a line pasted in from another app, a file cut off mid-letter)
@@ -22,12 +22,4 @@ export function decodeCsvBytes(bytes: Uint8Array): string {
     else if (code > 0x7f) letters++
   }
   return letters >= invalid ? text : new TextDecoder('windows-1252').decode(bytes)
-}
-
-/**
- * A CSV's bytes for Excel on Windows: UTF-8 after a byte order mark. Without the mark Excel reads the file as
- * Windows-1252, so Lim-Dûl shows as Lim-DÃ»l.
- */
-export function excelCsvBytes(text: string): Uint8Array<ArrayBuffer> {
-  return new TextEncoder().encode(text.startsWith('\uFEFF') ? text : `\uFEFF${text}`)
 }
