@@ -550,6 +550,12 @@ function HttpsSettings({ status }: { status: LanStatus }) {
               <p className="font-mono text-xs break-all text-stone-200 select-all">{status.caFingerprint}</p>
             </div>
           )}
+          {status.caReplaced && (
+            <p role="status" className="text-sm text-amber-300">
+              Binder has a new certificate. Each phone that installed the old one must remove the old Binder entry and install this
+              one, below.
+            </p>
+          )}
           <InstallSteps status={status} />
           {confirming ? (
             <div role="alert" className={confirmBox}>

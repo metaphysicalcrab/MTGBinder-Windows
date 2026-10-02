@@ -97,7 +97,7 @@ describe('pairing a phone (spec §5.10)', () => {
       const res = await pair(app, { code: wrong })
       expect([res.status, (await body<ApiErrorBody>(res)).error.message]).toEqual([
         400,
-        "That code isn't right: check the code on the PC and type it again",
+        `That code isn't right: check the code on the PC and type it again (${5 - i} ${5 - i === 1 ? 'try' : 'tries'} left)`,
       ])
     }
     expect(await body(await pair(app, { key: 'not-the-key' }))).toEqual({

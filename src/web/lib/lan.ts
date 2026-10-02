@@ -160,12 +160,14 @@ export function firewallNotes(
   return notes
 }
 
-/** Settings → Phone access: polled every 2 s while a pairing dialog is open, and every 10 s while phone access is on. */
+/** Settings → Phone access: polled every 2 s while a pairing dialog is open, and every 10 s otherwise. */
 export function useLanStatus(pairing = false) {
   return useQuery({
     queryKey: ['lan'],
     queryFn: ({ signal }) => apiGet<LanStatus>('/api/lan', signal),
-    refetchInterval: (query) => (pairing ? 2000 : query.state.data?.enabled ? 10_000 : false),
+    // Also while phone access is off: the desktop app's tray can turn it on with Settings open.
+    refetchInterval: pairing ? 2000 : 10_000,
+    staleTime: 0,
   })
 }
 

@@ -82,7 +82,12 @@ export function lanRoutes(lan: LanController): Hono<AppEnv> {
       if (attempt.closed || attempt.failures >= PAIRING_TRIES) {
         throw new ApiError(400, 'wrong_code', 'Too many wrong codes, so pairing stopped: on the PC, start pairing again')
       }
-      throw new ApiError(400, 'wrong_code', "That code isn't right: check the code on the PC and type it again")
+      const left = PAIRING_TRIES - attempt.failures
+      throw new ApiError(
+        400,
+        'wrong_code',
+        `That code isn't right: check the code on the PC and type it again (${left} ${left === 1 ? 'try' : 'tries'} left)`,
+      )
     }
     const https = isHttps(c)
     const origin = c.req.header('origin') ?? `${https ? 'https' : 'http'}://${c.req.header('host') ?? ''}`
