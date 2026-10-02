@@ -191,5 +191,25 @@ differences from the plan:
   doesn't list Electron's. The app also stops its server when Windows ends the session.
 - **Export for Excel** ended as a plain link to the server's `?excel=1` (Tasks 1 and 2 had each added the byte order
   mark on their side), and the playtest's conflict messages say "or on another device" on the page as on the server.
+- **The whole-milestone review**, after Task 10's docs were first written, changed:
+  - a phone's cookie works only over the scheme it paired with, told by the connection (TLS) rather than the URL: a
+    phone paired over HTTP pairs again once HTTPS is on, and the reverse. Settings marks the phones that must, and with
+    HTTPS on the pairing dialog and the phones' address say to install Binder's certificate first;
+  - a new phone's id is moved past every forgotten one (a restored backup winds SQLite's count back), and Forget all
+    keeps `1-<last id>` in `lan/forgotten`, so a backup brought back lists none of the old phones;
+  - `src/server/owner-only.ts` is the one way to write a private file, the certificates' writes without blocking and
+    every file's leftovers included; `src/server/platform.ts` names the computer (`computerNoun`: Mac, PC or computer,
+    in the tray and the server's own lines) and Windows' own programs (`windowsSystemPath`, `windowsPowerShell`);
+  - `pnpm app` and `pnpm move-library` count only this user's Binder.exe (`tasklist /FI USERNAME`), and move-library
+    clears its staging with retries;
+  - `BINDER_LAN_PORT` is a port from 1 to 65534, and on Windows the phones' port failures say what the desktop app
+    says of its own;
+  - Windows' firewall tip names Node.js JavaScript Runtime under `pnpm start` (`IN_DESKTOP_APP` tells them apart); a
+    request with no answer says what to check instead of "Failed to fetch"; a tablet held upright is told to turn it on
+    its side; and `useMediaQuery`, `inBinderApp` and `isThisComputersHostname` moved into `lib/platform.ts`.
+- **After the review**: a phone's page left open over HTTP as HTTPS came on said "Connecting…" for good, and now opens
+  itself again over HTTPS; the setup page and Settings say the certificate vouches for any private address and `.local`
+  name, never a website, and that its key, if copied, could pose as another device on the network; and
+  `/binder-ca.crt` is served as `application/octet-stream`, so Chrome on Android keeps it in Downloads.
 - Nothing ran on a Windows PC, an Android phone or a Mac. What each task couldn't check is in `m13-followups.md`, with
   the owner's first-use checks.

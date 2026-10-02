@@ -73,6 +73,7 @@ so the checks below are the first real use of most of it. The "Later" sections o
 ### On the Android phone (Chrome)
 1. **Phone access on.** In the app, Settings → Phone access → On (or the tray's Phone access).
    - Windows Defender Firewall asks: allow it on Private networks. Note the dialog's words and the program it names.
+     Under `pnpm start` it should name Node.js JavaScript Runtime, as Settings' tip does there.
    - The address Settings shows should be the Wi-Fi's (recommended); the tray's line and tooltip show the same. With
      Hyper-V or WSL on the PC, check a virtual adapter isn't the one recommended.
    - If Settings warns the Wi-Fi is Public, make it Private as it says; the warning should go within a minute.
@@ -98,13 +99,18 @@ so the checks below are the first real use of most of it. The "Later" sections o
    - Note whether Chrome reloads the page while the camera app is open (Android can end the tab; the photo would be
      lost).
    - Add the scans from the phone.
-6. **HTTPS.** On the PC, Settings → Phone access → Use HTTPS. Note whether the firewall asks again for port 4323.
-   - On the phone, open the setup address (or scan its QR code) and tap Download binder-ca.crt. Note whether Chrome
-     saves it to Downloads, or hands it to Android's installer, which refuses authorities since Android 11.
+6. **HTTPS.** Leave Binder open on the phone over HTTP. On the PC, Settings → Phone access → Use HTTPS. Note whether
+   the firewall asks again for port 4323.
+   - The phone's page opens itself again over HTTPS at its next request (a tap, or coming back to it), where Chrome
+     says the connection isn't private until the certificate is installed. Settings marks the phone "Paired over HTTP:
+     it must pair again to open Binder over HTTPS."
+   - On the phone, open the setup address (or scan its QR code) and tap Download binder-ca.crt. It's served as a plain
+     download, so Chrome should keep it in Downloads: note whether it hands it to Android's installer instead, which
+     refuses authorities since Android 11.
    - Install it as the steps say. Note the real menu names on this phone, to correct the steps. Check the fingerprint
      against Settings', and the "Network may be monitored" notice.
    - Restart Chrome, then Continue to Binder: pair again over HTTPS, with a new code. The name offered should now be
-     the phone's model. Settings lists one phone, not two.
+     the phone's model. Settings lists one phone, not two, and no longer says it must pair again.
 7. **The live camera** (over HTTPS): Scan opens the back camera (the main one, not a wide or macro one); Capture; Take
    a photo beside it; the camera list's real names ("camera2 0, facing back"); Auto (mounted) with the phone held still
    over the mat.
@@ -115,7 +121,7 @@ so the checks below are the first real use of most of it. The "Later" sections o
 9. **The rest.**
    - On the PC, Make a new certificate: the phone can't open Binder over HTTPS until it has the new one; remove the
      old one and install the new one, as Settings and the log say.
-   - Turn HTTPS off: the phone pairs again over HTTP.
+   - Turn HTTPS off: Settings marks the phone "Paired over HTTPS", and it pairs again at the HTTP address.
    - Settings → This phone → Forget this phone, then pair it again.
    - With the window closed, turn Phone access off in the tray: the phone can't reach Binder. Turn it on in the tray
      with Settings open on the PC: Settings follows within 10 s.
@@ -135,8 +141,9 @@ so the checks below are the first real use of most of it. The "Later" sections o
 5. **Binder.app:**
    - the menus as before; the camera prompt and the iPhone as before;
    - the menu-bar icon's menu: Open Binder, Phone access, Phone access…, Quit Binder. Turn Phone access on: macOS asks
-     whether Binder may accept incoming connections (and may ask again after the next `pnpm app`); the address line;
-     the tooltip; Phone access… opens Settings → Phone access;
+     whether Binder may accept incoming connections (and may ask again after the next `pnpm app`); the address line
+     (with the Mac on no network, "Phones: this Mac isn't on a network a phone can reach"); the tooltip; Phone
+     access… opens Settings → Phone access;
    - `/Applications/Binder.app/Contents/MacOS/Binder --quit` quits it.
 6. **The pages:** the shortcuts list shows ⌘Z, and Cmd+Z undoes; a Control-click on a playtest card opens its menu
    without tapping it, and on a menu's backdrop acts as a right-click; Getting started's Mac text; the key file is still
@@ -164,22 +171,18 @@ so the checks below are the first real use of most of it. The "Later" sections o
     the folder's path and so the account's name). Redact them for phones.
   - Ask on the PC before a phone pairs (its name, Allow or Refuse), as well as the code.
   - A per-phone Brainstorm switch: a phone spends the owner's Anthropic money like the PC.
-  - A phone's page whose `GET /api/lan/me` is refused with 403 `use_https` keeps saying "Connecting to Binder on the
-    PC…" and asking every 10 s, instead of saying where to open Binder (the refusal's message has the address). It
-    takes a page loaded over HTTP just before HTTPS came on (a page loaded after is sent to HTTPS). The gate could treat
-    `use_https` (and `wrong_host`) as answers.
-  - `/binder-ca.crt` is served as `application/x-x509-ca-cert`. If Chrome hands it to Android's installer (which
-    refuses authorities since Android 11) rather than saving it, serve it as `application/octet-stream`.
-  - The words about what the certificate can vouch for: the setup page says it "can't be used to read this phone's
-    traffic to any other site", and Settings that it vouches "never for a website". It can vouch for any private
-    address and any `.local` name, so its key, if copied, could pose as another device on the home network (the
-    router's page, a printer). Say that plainly, as the README now does.
-  - Phone-facing words say "the PC" on a Mac too: the tray's "Phones: this PC isn't on a network a phone can reach",
-    the log's, "Connecting to Binder on the PC…", `pc_only`'s "Change this on the PC running Binder", and the setup
-    page's "Binder on your PC".
-  - `certs.ts` keeps its own non-blocking private-file writer and its own leftovers cleanup (`removeLeftovers`,
-    `otherProcessRunning`), which duplicate `owner-only.ts` and `ai/key-store.ts`. Move one shared version into
-    `owner-only.ts`.
+  - The reverse of a page sent on to HTTPS: a phone's page open over HTTPS when HTTPS is turned off can't reach
+    Binder at all (its listener is gone). It says it's connecting, or that it couldn't reach Binder on the PC, until
+    it's opened at the HTTP address, where it pairs again; installed as an app, it opens only over HTTPS. Nothing tells
+    the phone where Binder went.
+  - Phone-facing words say "the PC" on a Mac too (the tray, the log and Settings' own errors now say Mac, PC or
+    computer, by `computerNoun`): the gate's "Connecting to Binder on the PC…", a request with no answer ("Couldn't
+    reach Binder on the PC"), `pc_only`'s "Change this on the PC running Binder", `unpaired`'s and the pairing
+    refusals' "on the PC, …", `wrong_host`'s "this PC's address", `queue_full`'s and `recently_refreshed`'s, the pairing
+    page ("On the PC: Settings → Phone access → Pair a phone"), the live camera's HTTPS notes there and on Scan, This
+    phone and the key line in a phone's Settings, Brainstorm's no-key note, Playtest's "a tablet or the PC", and the
+    setup page ("Binder on your PC", "Its key stays on the PC"). The server knows (`computerNoun`); `GET /api/lan/me`
+    could tell the phone's pages.
   - `PORT` and the phones' ports: with `PORT=4322` or `4323` (the old README's example) and phone access on, Binder's
     own two listeners want one port. The phones' then can't listen (EADDRINUSE on Linux; untried on Windows and the
     Mac), and Settings blames "another program". Nothing warns at start. The README's example is now 4330.
@@ -194,7 +197,6 @@ so the checks below are the first real use of most of it. The "Later" sections o
   - Playtest on a phone held sideways: the header and the tab bar take 114 of 412 px. The notice covers phones now
     (screens under 500 px tall), but a short window could hide the tab bar and fold the header on `/playtest`.
   - The pile and log panels aren't closed by Back: they'd race the menu and dialog entry they share a board with.
-  - Move `useMediaQuery` (`components/playtest/use-media-query.ts`) into `lib/platform.ts`, beside `useCoarsePointer`.
   - One `csv-bytes` check is skipped where `TextDecoder` reads windows-1252 as Latin-1 (Node 22): its bytes 0x80–0x9F
     are checked only in a browser.
 - **The desktop app on Windows** (`electron/`, `scripts/lib/install-win32.ts`):
@@ -203,13 +205,14 @@ so the checks below are the first real use of most of it. The "Later" sections o
   - Ending the session (shutdown, sign-out) is caught by a hidden window that stops the server and waits up to 3 s,
     blocking. It's best effort, and unverified.
   - `tasklist` on a Windows in another language: only its quoted rows are read, so its "no tasks" line shouldn't
-    matter. Untested.
+    matter. Untested, as is its filter for this user's processes (`USERNAME eq %USERDOMAIN%\%USERNAME%`) with a
+    Microsoft or work account.
   - The Mac could take the dark title bar too (`nativeTheme.themeSource = 'dark'`); it was left as it was.
   - `scripts/setup.ts` still builds the Mac's helper from `OCR_SOURCE` and `OCR_BINARY` rather than through
     `ocrHelper()`, and `buildOcrHelper` lives in `ocr-client.ts` for `scripts/app.ts`'s sake.
 - **Windows' file system** (`src/server/fs-retry.ts`, `src/server/startup.ts`):
   - The synchronous retries block the server (`Atomics.wait`) for up to 10 s when a file stays locked (2 s for scan
-    images). `certs.ts` shows the asynchronous way.
+    images). `owner-only.ts`'s `writeOwnerOnlyAsync` (the certificates') shows the asynchronous way.
   - Node 24 itself wasn't run (Node 22.22 here). `tls.setDefaultCACertificates` (24.5) and `import.meta.main` (24.2)
     have fallbacks; with Node 24.0 to 24.4, Windows' own certificates aren't trusted, so HTTPS-checking antivirus would
     make Scryfall look offline. `.node-version` says only 24.

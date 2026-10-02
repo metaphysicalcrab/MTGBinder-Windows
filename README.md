@@ -107,7 +107,7 @@ again with the other.
 ## Your phone
 
 An Android phone on the same Wi-Fi as the computer can use Binder too. In Chrome it opens the computer's Binder, every
-page fitted to a phone, and it scans cards with its own camera into the same library. Nothing is installed on the
+page fitted to a phone, and it scans cards with its own camera into the same library. Nothing needs installing on the
 phone, and nothing goes beyond your own network: the computer keeps the library and does the work.
 
 **Turning it on.** On the computer, turn on Settings → Phone access, or choose **Phone access** in the menu of Binder's
@@ -116,10 +116,11 @@ office networks only (addresses like 192.168.x.x, 10.x.x.x, or 172.16–31.x.x).
 turned off; while it's off, Binder opens only on the computer. Settings shows the address phones open (like
 `http://192.168.1.5:4322`) as text and as a QR code, and the terminal's `[phone]` line and the icon's menu say it too.
 - On Windows, the first time, Windows Defender Firewall asks whether Binder may use the network (for `pnpm start`, it
-  asks about Node.js): allow it on **Private networks**. If that was cancelled, allow Binder in Windows Security →
-  Firewall & network protection → Allow an app through firewall. A network Windows calls **Public** blocks phones
-  whatever the answer was. Settings says when the PC's is, and how to make it Private: on Windows 11, Settings → Network
-  & internet → Wi-Fi → the network's properties → Network profile type → Private network; on Windows 10, Settings →
+  asks about Node.js JavaScript Runtime): allow it on **Private networks**. If that was cancelled, allow Binder (or
+  Node.js JavaScript Runtime) in Windows Security → Firewall & network protection → Allow an app through firewall;
+  until a phone has paired, Settings names the one to allow. A network Windows calls **Public** blocks phones whatever
+  the answer was. Settings says when the PC's is, and how to make it Private: on Windows 11, Settings → Network &
+  internet → Wi-Fi → the network's properties → Network profile type → Private network; on Windows 10, Settings →
   Network & Internet → Wi-Fi → the network → Network profile → Private.
 - On a Mac, macOS may ask whether Binder may accept incoming connections: choose Allow. It may ask again after
   `pnpm app` rebuilds Binder.app.
@@ -129,13 +130,15 @@ runs on the computer with phone access on.
 
 **Pairing.** Each phone pairs once. On the computer, Settings → Phone access → **Pair a phone** shows a QR code and an
 8-digit code, good for 5 minutes and for one phone. On the phone, scan the QR code with the camera and open its link in
-Chrome: the phone pairs at once. Or open the address in Chrome and type the code. The phone is named after its model
-(over HTTPS; else "Android phone"), which you can change before pairing. It then stays paired: Chrome keeps its cookie
-for 400 days, renewed each day the phone uses Binder. A phone that types 5 wrong codes waits for a new code, and 20
-wrong codes from anywhere end it. Settings → Phone access lists the paired phones, with when and from where each was
-last seen: rename one, **Forget** one, or **Forget all phones**. A forgotten phone goes back to the pairing page the
-next time it uses Binder, and restoring an older backup doesn't let it in again. On the phone, Settings → This phone →
-**Forget this phone** does the same from there.
+Chrome: the phone pairs at once. Or open the address in Chrome and type the code. With HTTPS on, the phone installs
+Binder's certificate first (HTTPS, below), as the dialog says. The phone is named after its model (over HTTPS; else
+"Android phone"), which you can change before pairing. It then stays paired: Chrome keeps its cookie for 400 days,
+renewed each day the phone uses Binder. A phone that types 5 wrong codes waits for a new code, and 20 wrong codes from
+anywhere end it. Settings → Phone access lists the paired phones, with when and from where each was last seen, and
+which must pair again (one paired over HTTP while phones open Binder over HTTPS, or the reverse): rename one,
+**Forget** one, or **Forget all phones**. A forgotten phone goes back to the pairing page the next time it uses Binder,
+and restoring an older backup neither lets it in again nor lists it. On the phone, Settings → This phone → **Forget
+this phone** does the same from there.
 
 **What a phone can do.** Everything you do with your library: Library, Search, Sets, Decks, Scan, Playtest (on a
 tablet), and Brainstorm (with the key set on the computer); a card data refresh, at most once an hour; and the Scanner
@@ -159,9 +162,10 @@ many scans are ready and to check: tap those words to go to the queue.
 **HTTPS.** Chrome lets only a secure page use the live camera or be installed as an app, so Binder can serve phones
 over HTTPS too, with a certificate of its own that each phone installs once. Everything else works without it.
 1. On the computer, in Settings → Phone access, turn on **Use HTTPS**. Phones then open Binder at
-   `https://<address>:4323`, and the HTTP address sends pages there.
+   `https://<address>:4323`, and the HTTP address sends pages there (a page a phone has open over HTTP opens again
+   there at its next request).
 2. On the phone, in Chrome, open the setup address Settings shows (`http://<address>:4322/phone-setup`, or scan its QR
-   code), and tap **Download binder-ca.crt**.
+   code), and tap **Download binder-ca.crt**. Chrome keeps it in Downloads.
 3. Android doesn't install a certificate from the download itself. Open the phone's Settings → Security & privacy → More
    security settings → Encryption & credentials → Install a certificate → CA certificate → Install anyway, and pick
    `binder-ca.crt` from Downloads. On a Samsung: Settings → Security and privacy → More security settings → Install from
@@ -171,19 +175,20 @@ over HTTPS too, with a certificate of its own that each phone installs once. Eve
    name> (<the day it was made>)". Its SHA-256 fingerprint must be the one Settings → Phone access shows. If it isn't,
    remove it: the download came over plain HTTP, which someone else on the Wi-Fi could have changed.
 5. Close Chrome fully, open it again, and tap **Continue to Binder** on the setup page. A phone paired over HTTP pairs
-   again there, with a new code from Pair a phone; if HTTPS is turned off later, phones paired over HTTPS pair again
-   too.
+   again there, with a new code from Pair a phone: its pairing works only over HTTP. If HTTPS is turned off later,
+   phones paired over HTTPS pair again too.
 
 The certificate can vouch only for addresses on home and office networks (10.x, 172.16–31.x, 192.168.x), for `.local`
-names and the computer's own name, and only for websites. So it can't be used to read the phone's traffic to any site
-on the internet; someone who copied its key could at most pose as another device on your own network, such as the
-router's page. While it's installed, Android says the network may be monitored: that's this certificate. Its key stays
-in the library's `lan` folder, private to your account, and backups and `pnpm move-library` don't copy it. It lasts 10
-years; the server certificate it signs for the computer's addresses is made again by itself (when an address changes,
-and before its 397 days end), which phones don't notice. If you think the key was copied, **Make a new certificate** in
-Settings → Phone access, then on each phone remove the old one (Trusted credentials → User → it → Remove) and install
-the new one from the setup page. Settings also says when Binder made a new one itself, because the old one's files were
-missing or damaged. Firefox for Android ignores certificates installed this way: use Chrome.
+names and the computer's own name, and only for a site at one of them (never for mail). So it can't be used to read
+the phone's traffic to any site on the internet; someone who copied its key could at most pose as another device on
+your own network, such as the router's page. While it's installed, Android says the network may be monitored: that's
+this certificate. Its key stays in the library's `lan` folder, private to your account, and backups and
+`pnpm move-library` don't copy it: keep the computer as safe as the phone. It lasts 10 years; the server certificate it
+signs for the computer's addresses is made again by itself (when an address changes, and before its 397 days end),
+which phones don't notice. If you think the key was copied, **Make a new certificate** in Settings → Phone access,
+then on each phone remove the old one (Trusted credentials → User → it → Remove) and install the new one from the
+setup page. Settings also says when Binder made a new one itself, because the old one's files were missing, damaged,
+or near their end. Firefox for Android ignores certificates installed this way: use Chrome.
 
 **Binder as an app on the phone.** Over HTTPS, Chrome's ⋮ menu → **Add to Home screen** (or **Install app**) puts
 Binder on the home screen. It opens on Library, in its own window.
@@ -194,9 +199,10 @@ the computer in the router's settings (DHCP) keeps its address the same. A compu
 Ethernet, a VPN, or virtual machines' adapters) gives phones its Wi-Fi address first; Settings → Phone access can choose
 another.
 
-**Ports.** Phones use port 4322, and 4323 for HTTPS. `BINDER_LAN_PORT` moves them (HTTPS on the next port up), as in
-`$env:BINDER_LAN_PORT=4422; pnpm start`, and `BINDER_LAN=0` keeps phone access off for that Binder, whatever Settings
-says. When Binder can't listen on a port, Settings says why.
+**Ports.** Phones use port 4322, and 4323 for HTTPS. `BINDER_LAN_PORT` moves them (a port from 1 to 65534, HTTPS on
+the next port up), as in `$env:BINDER_LAN_PORT=4422; pnpm start`, and `BINDER_LAN=0` keeps phone access off for that
+Binder, whatever Settings says. The desktop app on Windows reads them as environment variables for your account. When
+Binder can't listen on a port, Settings says why.
 
 ## Searching
 
@@ -285,7 +291,7 @@ for each seat (or **Nobody** for seat 2), who goes first, and starting life, or 
   in a card's menu shows it large, as hovering does with a mouse. Back closes a menu, a dialog, or the card you're
   viewing. Below a laptop's width, the turn bar's Log, Switch side, and End game are under its ⋯. On a phone, either
   way up, Playtest says it needs a bigger screen and offers **Show the table anyway**; setup and the mulligans work
-  there.
+  there. A tablet held upright whose screen is too narrow for the table is told to turn it on its side.
 
 ## Brainstorm
 
@@ -383,7 +389,8 @@ Card data refreshes automatically at startup when it's older than 7 days (or whe
 something new from it), or from Settings → Card data.
 Everything lives in `data/` (database, downloads, and backups in `data/backups`: a backup is written when Binder
 starts and the last one is over 24 hours old, and the newest 7 are kept). Phone access keeps its own files in
-`data/lan/` (the phones' secret and the HTTPS certificates, private to you), which backups leave out.
+`data/lan/` (the phones' secret, the phones forgotten, and the HTTPS certificates, private to you), which backups
+leave out.
 Settings → Backups shows the last backup and the folder, and **Back up now** saves one on demand (once today's backup
 exists it saves an extra copy; the newest 3 extra copies are kept, apart from the daily 7).
 Before a Binder update changes the database's structure, it also saves `binder-YYYY-MM-DD-before-NNN.db` there (the
