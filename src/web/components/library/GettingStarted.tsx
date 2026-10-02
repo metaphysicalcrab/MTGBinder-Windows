@@ -1,4 +1,5 @@
 import { Link } from 'react-router'
+import { useOnOverlayEntry } from '../../lib/back-to-close.ts'
 import { PLATFORM, type Platform } from '../../lib/platform.ts'
 import { useBulkStatus } from '../../lib/use-bulk-status.ts'
 import { useOpenShortcuts } from '../ShortcutsDialog.tsx'
@@ -35,6 +36,8 @@ const FIRST_STEPS: ReadonlyArray<{ to: string; state?: object; title: string; te
 export function GettingStarted() {
   const openShortcuts = useOpenShortcuts()
   const noCardData = useBulkStatus().data?.cardCount === 0
+  // With the import panel open above, a step replaces the panel's history entry (see useOnOverlayEntry).
+  const fromOverlay = useOnOverlayEntry()
   if (noCardData) return null
   return (
     <section aria-labelledby="getting-started">
@@ -47,6 +50,7 @@ export function GettingStarted() {
             <Link
               to={step.to}
               state={step.state}
+              replace={fromOverlay}
               className="block h-full rounded-xl border border-stone-800 bg-stone-900/40 p-4 hover:border-amber-700/60 hover:bg-stone-900"
             >
               <span className="text-xs text-amber-400 tabular-nums">{i + 1}</span>

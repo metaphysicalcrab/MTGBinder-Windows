@@ -63,6 +63,10 @@ export function DeckHeader({ deck, onShowWarnings }: { deck: DeckDetail; onShowW
 
   return (
     <header className="space-y-3">
+      {/*
+        Below lg (a phone, either way up, or a tablet) the name has a line of its own. From lg up it shares one with the
+        controls, keeping at least 12rem: what doesn't fit beside it goes to the next line.
+      */}
       <div className="flex flex-wrap items-center gap-3">
         <input
           aria-label="Deck name"
@@ -80,7 +84,7 @@ export function DeckHeader({ deck, onShowWarnings }: { deck: DeckDetail; onShowW
           }}
           autoCapitalize="words"
           enterKeyHint="done"
-          className="min-w-0 flex-1 basis-full rounded-md border border-transparent bg-transparent px-1 font-serif text-2xl font-semibold text-stone-50 hover:border-stone-800 focus:border-stone-700 focus:outline-none sm:basis-0 sm:text-3xl"
+          className="min-w-0 flex-1 basis-full rounded-md border border-transparent bg-transparent px-1 font-serif text-2xl font-semibold text-stone-50 hover:border-stone-800 focus:border-stone-700 focus:outline-none sm:text-3xl lg:min-w-48 lg:basis-0"
         />
         {!empty && <ColorPips identity={deck.colorIdentity} className="text-lg" />}
         <select

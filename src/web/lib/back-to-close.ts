@@ -5,6 +5,9 @@ import { useEffect, useRef, useSyncExternalStore } from 'react'
  * page under it (M13). An open overlay adds a history entry of its own, at the same address, marked with its id; Back
  * takes that entry off and the overlay closes. Closing it any other way (Escape, Close, a click outside) takes its
  * entry back off, so a later Back isn't spent on it. The router sees only a step to the address it already shows.
+ *
+ * A navigation made while an overlay's entry is the current one replaces it (useOnOverlayEntry, onOverlayEntry): pushed
+ * on top, the entry would stay in the history once the overlay closed, a Back that changes nothing.
  */
 
 const MARK = 'binderOverlay'
@@ -73,8 +76,12 @@ function takeOff() {
   window.history.back()
 }
 
-/** Closes an overlay on Back while `open` (see openOverlayEntry). `onClose` may change from render to render. */
-export function useBackToClose(open: boolean, onClose: () => void): void {
+/**
+ * Closes an overlay on Back while `open` (see openOverlayEntry). `onClose` may change from render to render. An overlay
+ * that leaves the page under it usable (Library's import panel) passes the location's key as `entryKey`: when the page
+ * navigates with it open, replacing its entry (a search), it adds another on top, so Back still closes it first.
+ */
+export function useBackToClose(open: boolean, onClose: () => void, entryKey?: string): void {
   const close = useRef(onClose)
   useEffect(() => {
     close.current = onClose
@@ -82,7 +89,7 @@ export function useBackToClose(open: boolean, onClose: () => void): void {
   useEffect(() => {
     if (!open) return
     return openOverlayEntry(() => close.current())
-  }, [open])
+  }, [open, entryKey])
 }
 
 function watch(onChange: () => void): () => void {

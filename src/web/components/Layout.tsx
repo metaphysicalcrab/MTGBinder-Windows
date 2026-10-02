@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
-import { useOnOverlayEntry } from '../lib/back-to-close.ts'
+import { onOverlayEntry, useOnOverlayEntry } from '../lib/back-to-close.ts'
 import { useCardDrawer } from '../lib/card-drawer.tsx'
 import { createGoTo, GO_TO, shortcutAllowed } from '../lib/shortcuts.ts'
 import { useBulkRefresh } from '../lib/use-bulk-status.ts'
@@ -44,7 +44,8 @@ export function Layout() {
       const path = goTo.press(e.key, performance.now())
       if (path !== null) {
         e.preventDefault()
-        void navigate(path)
+        // As the header's links do (Library's import panel is open, say).
+        void navigate(path, { replace: onOverlayEntry() })
       }
     }
     window.addEventListener('keydown', onKey)

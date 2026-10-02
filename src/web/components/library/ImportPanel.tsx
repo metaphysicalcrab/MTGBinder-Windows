@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
+import { useLocation } from 'react-router'
 import type { ImportItem, ImportPreview, ImportResult, ImportRow } from '../../../shared/types.ts'
 import { apiPost } from '../../lib/api.ts'
 import { useBackToClose } from '../../lib/back-to-close.ts'
@@ -14,8 +15,8 @@ const SHOWN_ROWS = 200
 
 /** CSV import (spec §5.3): choose or paste a file, preview how its rows resolve, then add them to the library. */
 export function ImportPanel({ onClose }: { onClose: () => void }) {
-  // Back closes the panel, as it would a dialog (Android's Back above all).
-  useBackToClose(true, onClose)
+  // Back closes the panel, as it would a dialog (Android's Back above all), after a search made with it open too.
+  useBackToClose(true, onClose, useLocation().key)
   const [text, setText] = useState('')
   const [fileName, setFileName] = useState<string | null>(null)
   const [includeAmbiguous, setIncludeAmbiguous] = useState(true)

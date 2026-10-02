@@ -41,12 +41,17 @@ export function YourCopies({ detail, onSelectPrinting }: { detail: CardDetail; o
           {detail.copies.map((copy) => {
             const label = `${copy.setCode.toUpperCase()} #${copy.collectorNumber} ${copy.finish}`
             const canAdd = finishesById.get(copy.cardId)?.includes(copy.finish) ?? false
+            const cantAdd = canAdd ? undefined : `This printing no longer comes in ${copy.finish}`
             return (
-              // Below sm, two lines: the printing, then its price and the stepper, so the name has the row's width.
-              <li key={`${copy.cardId}-${copy.finish}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm sm:flex-nowrap">
+              // Below sm, two lines: the printing, then its price and the stepper, so the name has the row's width. For a
+              // finger, why + is greyed out goes on a line of its own under them.
+              <li
+                key={`${copy.cardId}-${copy.finish}`}
+                className={`flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm sm:flex-nowrap ${canAdd ? '' : 'sm:pointer-coarse:flex-wrap'}`}
+              >
                 <button
                   onClick={() => onSelectPrinting(copy.cardId)}
-                  className="w-12 shrink-0 text-left font-mono text-xs text-stone-400 uppercase hover:text-amber-300 pointer-coarse:py-2"
+                  className="w-12 shrink-0 text-left font-mono text-xs text-stone-400 uppercase hover:text-amber-300 pointer-coarse:min-h-10"
                 >
                   {copy.setCode}
                 </button>
@@ -68,7 +73,7 @@ export function YourCopies({ detail, onSelectPrinting }: { detail: CardDetail; o
                     <button
                       aria-label={`Add one ${label}`}
                       disabled={!canAdd}
-                      title={canAdd ? undefined : `This printing no longer comes in ${copy.finish}`}
+                      title={cantAdd}
                       onClick={() => adjust.mutate({ cardId: copy.cardId, finish: copy.finish, delta: 1 })}
                       className={stepButton}
                     >
@@ -76,6 +81,7 @@ export function YourCopies({ detail, onSelectPrinting }: { detail: CardDetail; o
                     </button>
                   </span>
                 </span>
+                {cantAdd && <span className="hidden basis-full text-right text-xs text-stone-500 pointer-coarse:block">{cantAdd}</span>}
               </li>
             )
           })}

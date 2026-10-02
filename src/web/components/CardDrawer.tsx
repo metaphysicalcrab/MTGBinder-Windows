@@ -134,7 +134,7 @@ function CardDetailView({ detail, onSelectPrinting }: { detail: CardDetail; onSe
             href={card.scryfallUri}
             target="_blank"
             rel="noreferrer"
-            className="block text-center text-xs text-stone-500 hover:text-amber-400 pointer-coarse:py-2"
+            className="block text-center text-xs text-stone-500 hover:text-amber-400 pointer-coarse:py-3"
           >
             View on Scryfall ↗
           </a>

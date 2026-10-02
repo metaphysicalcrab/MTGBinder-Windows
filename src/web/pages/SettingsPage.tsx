@@ -3,7 +3,6 @@ import { useState } from 'react'
 import type { Finish } from '../../shared/types.ts'
 import { apiPost } from '../lib/api.ts'
 import { formatDate } from '../lib/format.ts'
-import { IS_WINDOWS } from '../lib/platform.ts'
 import {
   librarySizeText,
   useAiKey,
@@ -286,9 +285,8 @@ function ApiKeySettings() {
     <section className={section}>
       <h2 className="text-lg font-semibold text-stone-100">Anthropic API key</h2>
       <p className="mt-1 text-sm text-stone-400">
-        {/* The file's permissions (owner only) are the Mac's and Linux's way of saying so; on Windows it says where. */}
-        For Claude's deckbuilding help. It's saved in Binder's <code>.env</code> file{IS_WINDOWS ? ',' : ', readable only by you,'}{' '}
-        and scanning never uses it.
+        For Claude's deckbuilding help. It's saved in Binder's <code>.env</code> file, readable only by you, and scanning
+        never uses it.
       </p>
       {error && <p className="mt-3 text-sm text-rose-300">Couldn't load the key status: {error.message}</p>}
       {status && (

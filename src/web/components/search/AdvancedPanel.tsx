@@ -35,10 +35,15 @@ const input =
   'w-full rounded-md border border-stone-700 bg-stone-900 px-2.5 py-1.5 text-sm text-stone-100 outline-none placeholder:text-stone-600 focus:border-amber-500/70 disabled:opacity-50 pointer-coarse:py-2.5'
 
 /**
- * A text field's keyboard on a phone: names, codes and rules words go into a search as typed, so no capitals,
- * corrections or suggestions, and Enter says Search (it submits the search above).
+ * A text field's keyboard on a phone: names, codes and rules words go into a search as typed, so no capitals or
+ * corrections, and Enter says Search (it submits the search above).
  */
-const searchKeyboard = { autoCapitalize: 'none', autoCorrect: 'off', autoComplete: 'off', spellCheck: false, enterKeyHint: 'search' } as const
+const searchKeyboard = { autoCapitalize: 'none', autoCorrect: 'off', spellCheck: false, enterKeyHint: 'search' } as const
+/**
+ * The same, without the browser's suggestions of what was typed before. Not for a field with a list of its own (Set,
+ * In deck, Types): Firefox shows no list for a field with autocomplete off.
+ */
+const searchText = { ...searchKeyboard, autoComplete: 'off' } as const
 
 interface Props {
   form: AdvancedForm
@@ -88,10 +93,10 @@ export function AdvancedPanel({ form, scope, paused, onChange, onReset }: Props)
       )}
       <fieldset disabled={paused} className="grid gap-x-6 gap-y-4 md:grid-cols-2">
         <Field label="Name">
-          <input className={input} {...searchKeyboard} value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. bolt" />
+          <input className={input} {...searchText} value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. bolt" />
         </Field>
         <Field label="Rules text">
-          <input className={input} {...searchKeyboard} value={form.oracle} onChange={(e) => set('oracle', e.target.value)} placeholder="e.g. draw a card" />
+          <input className={input} {...searchText} value={form.oracle} onChange={(e) => set('oracle', e.target.value)} placeholder="e.g. draw a card" />
         </Field>
         <Field label="Types">
           <TypeChips types={form.types} listId={typeListId} onChange={(next) => set('types', next)} />
@@ -102,7 +107,7 @@ export function AdvancedPanel({ form, scope, paused, onChange, onReset }: Props)
           </datalist>
         </Field>
         <Field label="Mana cost">
-          <input className={input} {...searchKeyboard} value={form.mana} onChange={(e) => set('mana', e.target.value)} placeholder="e.g. {2}{W}{W} or 2WW" />
+          <input className={input} {...searchText} value={form.mana} onChange={(e) => set('mana', e.target.value)} placeholder="e.g. {2}{W}{W} or 2WW" />
         </Field>
         <Field label="Colors">
           <ColorPicker field={form.colors} onChange={(next) => set('colors', next)} />
@@ -171,13 +176,13 @@ export function AdvancedPanel({ form, scope, paused, onChange, onReset }: Props)
           </div>
         </Field>
         <Field label="Artist">
-          <input className={input} {...searchKeyboard} value={form.artist} onChange={(e) => set('artist', e.target.value)} />
+          <input className={input} {...searchText} value={form.artist} onChange={(e) => set('artist', e.target.value)} />
         </Field>
         <Field label="Flavor text">
-          <input className={input} {...searchKeyboard} value={form.flavor} onChange={(e) => set('flavor', e.target.value)} />
+          <input className={input} {...searchText} value={form.flavor} onChange={(e) => set('flavor', e.target.value)} />
         </Field>
         <Field label="Keywords">
-          <input className={input} {...searchKeyboard} value={form.keywords} onChange={(e) => set('keywords', e.target.value)} placeholder="Comma-separated, e.g. flying, haste" />
+          <input className={input} {...searchText} value={form.keywords} onChange={(e) => set('keywords', e.target.value)} placeholder="Comma-separated, e.g. flying, haste" />
         </Field>
         {scope === 'library' && (
           <div className="grid gap-3 border-t border-stone-800 pt-4 md:col-span-2 md:grid-cols-4">
@@ -330,10 +335,9 @@ function TypeChips({ types, listId, onChange }: { types: string[]; listId: strin
           }
         }}
         onBlur={() => add(draft)}
-        autoCapitalize="none"
-        autoCorrect="off"
-        autoComplete="off"
-        spellCheck={false}
+        {...searchKeyboard}
+        // A phone's Enter key says what it does here (onKeyDown).
+        enterKeyHint={draft.trim() === '' ? 'search' : 'enter'}
         placeholder={types.length === 0 ? 'e.g. Legendary, Creature, Elf' : ''}
         className="min-w-24 flex-1 bg-transparent py-0.5 text-sm text-stone-100 outline-none placeholder:text-stone-600 pointer-coarse:py-2"
       />

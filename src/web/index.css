@@ -65,3 +65,18 @@ html {
     padding-bottom: 0;
   }
 }
+
+/*
+ * Where the toasts (lib/toast.tsx) stand: above the bottom tab bar below lg, and at the bottom of the window from lg up.
+ * While a dialog covers the page and its tabs (the card drawer, More), at the bottom too: above the hidden tabs, they'd
+ * sit in the middle of the dialog, over what's there to tap.
+ */
+@utility toast-offset {
+  bottom: calc(var(--nav-height) + env(safe-area-inset-bottom) + 0.75rem);
+  :root:has([aria-modal="true"]) & {
+    bottom: calc(env(safe-area-inset-bottom) + 1rem);
+  }
+  @variant lg {
+    bottom: 1rem;
+  }
+}

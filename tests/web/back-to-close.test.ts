@@ -121,6 +121,29 @@ describe('openOverlayEntry', () => {
     expect(b.window.history.back).not.toHaveBeenCalled()
   })
 
+  it('adds another entry after a navigation from its own replaced it (a search with the import panel open)', () => {
+    const b = browser()
+    const panel = vi.fn()
+    const first = openOverlayEntry(panel)
+    vi.runAllTimers()
+    // The search sees it's on the overlay's entry, and replaces it rather than leaving it in the history...
+    expect(onOverlayEntry()).toBe(true)
+    b.window.history.replaceState({ idx: 0, key: 'search' }, '')
+    // ...and the panel, seeing the new location (useBackToClose's entryKey), gives up its old entry and adds another.
+    first()
+    const second = openOverlayEntry(panel)
+    vi.runAllTimers()
+    expect(b.window.history.back).not.toHaveBeenCalled()
+    expect(b.entries).toEqual([{ idx: 0, key: 'page' }, { idx: 0, key: 'search' }, { idx: 0, key: 'search', binderOverlay: expect.any(Number) }])
+    // Back closes the panel and keeps the search.
+    b.press.back()
+    expect(panel).toHaveBeenCalledTimes(1)
+    expect(b.window.history.state).toEqual({ idx: 0, key: 'search' })
+    second()
+    vi.runAllTimers()
+    expect(b.window.history.back).not.toHaveBeenCalled()
+  })
+
   it('closes stacked overlays one Back at a time, the top one first', () => {
     const b = browser()
     const panel = vi.fn()

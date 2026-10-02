@@ -22,7 +22,7 @@ const MAX_TOASTS = 4
 
 /**
  * Brief messages about changes (spec §6: toasts for mutations), stacked in the bottom-right corner; below lg, above the
- * bottom tab bar, and across the width of a phone.
+ * bottom tab bar (but over a dialog covering it, at the bottom: toast-offset in index.css), and across a phone's width.
  */
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([])
@@ -45,7 +45,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       <div
         aria-live="polite"
-        className="pointer-events-none fixed inset-x-4 bottom-[calc(var(--nav-height)+env(safe-area-inset-bottom)+0.75rem)] z-50 flex flex-col gap-2 sm:left-auto sm:w-80 sm:max-w-[calc(100vw-2rem)] lg:bottom-4"
+        className="toast-offset pointer-events-none fixed inset-x-4 z-50 flex flex-col gap-2 sm:left-auto sm:w-80 sm:max-w-[calc(100vw-2rem)]"
       >
         {toasts.map((toast) => (
           <div
