@@ -1,4 +1,4 @@
-import type { MiddlewareHandler } from 'hono'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { z } from 'zod'
 import type { Span } from '../shared/search/ast.ts'
@@ -9,6 +9,8 @@ export class ApiError extends Error {
   code: string
   /** For query errors: the part of the query that's wrong. */
   span: Span | undefined
+  /** For 429s: the seconds to wait before trying again (the Retry-After header). */
+  retryAfter: number | undefined
   constructor(status: ContentfulStatusCode, code: string, message: string, span?: Span) {
     super(message)
     this.name = 'ApiError'
@@ -16,6 +18,13 @@ export class ApiError extends Error {
     this.code = code
     this.span = span
   }
+}
+
+/** A 429 `rate_limited`, saying how many seconds to wait (and in its Retry-After header). */
+export function rateLimited(seconds: number, message = 'Too many requests from this device'): ApiError {
+  const err = new ApiError(429, 'rate_limited', `${message}; try again in ${seconds} s`)
+  err.retryAfter = seconds
+  return err
 }
 
 /** Validates input with a zod schema; throws a 400 ApiError listing every problem. */
@@ -59,7 +68,7 @@ export function isLocalHostname(hostname: string): boolean {
 }
 
 /** The hostname part of a Host header: `[::1]:4321` → `[::1]`, `localhost:5173` → `localhost`, `127.0.0.1` → itself. */
-function hostHeaderHostname(host: string): string {
+export function hostHeaderHostname(host: string): string {
   return /^(\[[^\]]*\]|[^:]*)(?::\d*)?$/.exec(host.trim())?.[1] ?? ''
 }
 
@@ -68,7 +77,7 @@ function hostHeaderHostname(host: string): string {
  * own page, or the dev server's page, which it proxies with its own Host. Another page on this computer (another
  * port) is another origin.
  */
-function isSameOrigin(origin: string, host: string): boolean {
+export function isSameOrigin(origin: string, host: string): boolean {
   try {
     return new URL(origin).host.toLowerCase() === host.trim().toLowerCase()
   } catch {
@@ -77,21 +86,22 @@ function isSameOrigin(origin: string, host: string): boolean {
 }
 
 /** `Sec-Fetch-Site` values a browser sends for Binder's own page, or for a request typed by hand. */
-const OWN_FETCH_SITES = new Set(['same-origin', 'none'])
+export const OWN_FETCH_SITES: ReadonlySet<string> = new Set(['same-origin', 'none'])
+
+/** The listener a request came in on: this computer's (127.0.0.1:4321, spec §6), or the phones' (spec §5.10). */
+export type Listener = 'local' | 'lan'
 
 /**
- * Refuses API requests that don't come from this computer. The Host header must name this computer (defeats DNS
- * rebinding), and a request that can change something must come from Binder's own page (defeats CSRF), not from
- * another site, nor from another page on this computer (another port).
+ * Who a request is from, as the guard (lan/guard.ts) found it: this computer, a paired phone, or a phone that isn't
+ * paired yet (only on the routes anyone may use).
  */
-export const localOnly: MiddlewareHandler = async (c, next) => {
-  const host = c.req.header('host')
-  let allowed = host !== undefined && isLocalHostname(hostHeaderHostname(host))
-  if (host !== undefined && allowed && c.req.method !== 'GET' && c.req.method !== 'HEAD') {
-    const origin = c.req.header('origin')
-    const site = c.req.header('sec-fetch-site')
-    allowed = (site === undefined || OWN_FETCH_SITES.has(site)) && (origin === undefined || isSameOrigin(origin, host))
-  }
-  if (!allowed) throw new ApiError(403, 'forbidden', 'Requests must come from this computer')
-  await next()
+export type Client = { kind: 'pc' } | { kind: 'device'; id: number; name: string } | { kind: 'unpaired' }
+
+/**
+ * The app's Hono environment. `c.env` is what the listener passes in: Node's request and response, and which listener
+ * it is (none, as from `app.request()` in tests, is this computer's). `c.var.client` is set by the guard.
+ */
+export interface AppEnv {
+  Bindings: { incoming?: IncomingMessage; outgoing?: ServerResponse; listener?: Listener }
+  Variables: { client: Client }
 }
