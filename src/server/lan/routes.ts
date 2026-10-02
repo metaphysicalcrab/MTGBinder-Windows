@@ -63,7 +63,7 @@ export function lanRoutes(lan: LanController): Hono<AppEnv> {
     if (wait) throw rateLimited(wait, 'Too many tries at pairing from this phone')
     const { code, key, name } = parseWith(PairBody, await readJson(c.req))
     const from = peer ?? 'an unknown address'
-    const attempt = lan.pairing.attempt({ code, key })
+    const attempt = lan.pairing.attempt({ code, key }, peer ?? 'unknown')
     if (attempt.outcome === 'closed') {
       const message =
         attempt.reason === 'too_many_tries'
@@ -77,6 +77,10 @@ export function lanRoutes(lan: LanController): Hono<AppEnv> {
       lan.log(`[phone] Wrong pairing code from ${from} (${attempt.failures} of ${PAIRING_TRIES})`)
       if (attempt.closed) {
         lan.log('[phone] Too many wrong codes; pairing stopped')
+      } else if (attempt.failures >= PAIRING_TRIES) {
+        lan.log(`[phone] Too many wrong codes from ${from}: it can't pair until pairing starts again`)
+      }
+      if (attempt.closed || attempt.failures >= PAIRING_TRIES) {
         throw new ApiError(400, 'wrong_code', 'Too many wrong codes, so pairing stopped: on the PC, start pairing again')
       }
       throw new ApiError(400, 'wrong_code', "That code isn't right: check the code on the PC and type it again")

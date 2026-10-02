@@ -50,6 +50,21 @@ describe("this PC's addresses for phones (spec §5.10)", () => {
     expect(lanAddresses({})).toEqual([])
   })
 
+  it("puts a Hyper-V switch someone made (perhaps External, on the PC's network) before WSL's and the Default Switch", () => {
+    const hyperV = {
+      'vEthernet (WSL (Hyper-V firewall))': [ipv4('172.28.16.1', 20)],
+      'vEthernet (Default Switch)': [ipv4('172.25.32.1', 20)],
+      'vEthernet (External Switch)': [ipv4('192.168.1.20', 24)],
+      'vEthernet (nat)': [ipv4('172.30.0.1', 20)],
+    }
+    expect(lanAddresses(hyperV).map((a) => [a.interface, a.recommended])).toEqual([
+      ['vEthernet (External Switch)', false],
+      ['vEthernet (WSL (Hyper-V firewall))', false],
+      ['vEthernet (Default Switch)', false],
+      ['vEthernet (nat)', false],
+    ])
+  })
+
   it('knows private networks and this computer', () => {
     expect(['10.0.0.1', '10.255.255.255', '172.16.0.0', '172.31.255.255', '192.168.0.1', '192.168.255.255'].every(isPrivateIPv4)).toBe(true)
     expect(['9.255.255.255', '11.0.0.0', '172.15.255.255', '172.32.0.0', '192.169.0.1', '8.8.8.8', 'fd00::1', 'nope'].some(isPrivateIPv4)).toBe(false)
@@ -66,6 +81,13 @@ describe('who may connect to the phones\' listener', () => {
     expect(allowed.filter((a) => !book.allows(a))).toEqual([])
     const refused = ['192.168.2.40', '10.8.0.3', '8.8.8.8', 'fe80::1', '2001:db8::1', undefined]
     expect(refused.filter((a) => book.allows(a))).toEqual([])
+  })
+
+  it("allows no one from a public address's network, nor beyond a private network's block", () => {
+    // A PC with a public address (a bridged modem, a campus network), and a VPN that says its netmask is /0.
+    const book = createAddressBook({ interfaces: () => ({ Ethernet: [ipv4('203.0.113.10', 22)], tun0: [ipv4('10.8.0.2', 0)] }) })
+    expect(['203.0.112.77', '203.0.113.11', '8.8.8.8', '192.168.1.40', '11.0.0.1'].filter((a) => book.allows(a))).toEqual([])
+    expect(['10.8.0.3', '10.200.1.1', '127.0.0.1'].every((a) => book.allows(a))).toBe(true)
   })
 
   it('reads the networks again when a stranger may be on one just joined, at most every 2 s', () => {

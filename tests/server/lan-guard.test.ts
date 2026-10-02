@@ -244,6 +244,26 @@ describe('which requests are from this computer (spec §6 Requests)', () => {
     expect(app.lines).toContain('[phone] Paired "Pixel 8" from 192.168.1.40')
   })
 
+  it("refuses a paired phone through the dev server's proxy while phone access is off", async () => {
+    const proxied = (app: ReturnType<typeof makeLanApp>, cookie: string) =>
+      app.request(
+        '/api/collection/stats',
+        { headers: { 'X-Forwarded-For': '192.168.1.40' } },
+        { listener: 'local', peer: '127.0.0.1', host: '192.168.1.5:5173', cookie },
+      )
+    const app = makeLanApp()
+    await app.lan.update({ enabled: true })
+    const cookie = await app.pair()
+    expect((await proxied(app, cookie)).status).toBe(200)
+    await app.lan.update({ enabled: false })
+    expect(await body(await proxied(app, cookie))).toEqual({
+      error: { code: 'unpaired', message: 'Phone access is off: on the PC, turn it on in Settings → Phone access' },
+    })
+    // Nor with BINDER_LAN=0, which keeps it off.
+    const lanOff = makeLanApp({}, { port: null })
+    expect(await error(await proxied(lanOff, await lanOff.pair()))).toEqual([401, 'unpaired'])
+  })
+
   it("keeps this computer's answers when there's no phone access", async () => {
     const app = createApp({ db: createTestDb(), bulk: stubBulk(), scryfall: stubScryfall() })
     const res = await app.request('/api/bulk/status', { headers: { Host: 'localhost:4321' } })

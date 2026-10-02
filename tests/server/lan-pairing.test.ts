@@ -82,7 +82,7 @@ describe('pairing a phone (spec §5.10)', () => {
     expect(logged).not.toContain(window.code)
   })
 
-  it('stops pairing after 5 wrong codes, saying so on the PC', async () => {
+  it('stops an address after 5 wrong codes, but not the others: one device on the Wi-Fi can\'t keep the owner from pairing', async () => {
     const app = makeLanApp()
     const window = await pairing(app)
     const wrong = window.code === '00000000' ? '00000001' : '00000000'
@@ -99,9 +99,27 @@ describe('pairing a phone (spec §5.10)', () => {
     expect(app.lines.filter((line) => line.startsWith('[phone] Wrong'))).toEqual(
       [1, 2, 3, 4, 5].map((n) => `[phone] Wrong pairing code from 192.168.1.40 (${n} of 5)`),
     )
-    expect(app.lines).toContain('[phone] Too many wrong codes; pairing stopped')
-    // The right code is too late now.
+    expect(app.lines).toContain("[phone] Too many wrong codes from 192.168.1.40: it can't pair until pairing starts again")
+    // The right code is too late from that address now.
     const late = await pair(app, { code: window.code })
+    expect([late.status, (await body<ApiErrorBody>(late)).error.message]).toEqual([
+      409,
+      'Too many wrong codes, so pairing stopped: on the PC, start pairing again',
+    ])
+    // The window is still open on the PC, and another phone pairs with it.
+    expect((await body<LanStatus>(await app.local('/api/lan'))).pairing).toEqual(window)
+    expect((await pair(app, { code: window.code }, '192.168.1.41')).status).toBe(201)
+  })
+
+  it('stops pairing after 20 wrong codes from anywhere, saying so on the PC', async () => {
+    const app = makeLanApp()
+    const window = await pairing(app)
+    const wrong = window.code === '00000000' ? '00000001' : '00000000'
+    for (const peer of ['192.168.1.41', '192.168.1.42', '192.168.1.43', '192.168.1.44']) {
+      for (let i = 0; i < 5; i++) expect((await pair(app, { code: wrong }, peer)).status).toBe(400)
+    }
+    expect(app.lines).toContain('[phone] Too many wrong codes; pairing stopped')
+    const late = await pair(app, { code: window.code }, '192.168.1.45')
     expect([late.status, (await body<ApiErrorBody>(late)).error.message]).toEqual([
       409,
       'Too many wrong codes, so pairing stopped: on the PC, start pairing again',
@@ -144,8 +162,8 @@ describe('pairing a phone (spec §5.10)', () => {
     const limited = await pair(app, { code: '1' })
     expect(await error(limited)).toEqual([429, 'rate_limited'])
     expect(limited.headers.get('retry-after')).toBe('60')
-    // Another address may still try; this one may again in a minute.
-    expect((await pair(app, { code: '1' }, '192.168.1.41')).status).toBe(409)
+    // Another address may still try; this one may again in a minute (though its 5 wrong codes have stopped it).
+    expect((await pair(app, { code: '1' }, '192.168.1.41')).status).toBe(400)
     time.add(60_000)
     expect((await pair(app, { code: '1' })).status).toBe(409)
   })
@@ -217,6 +235,46 @@ describe('paired phones (spec §5.10)', () => {
     fs.mkdirSync(before.dir, { recursive: true })
     fs.writeFileSync(path.join(before.dir, 'secret'), secret)
     expect((await before.request('/api/collection/stats', {}, { cookie })).status).toBe(200)
+  })
+
+  it('keeps a phone forgotten on its own forgotten when a backup brings its row back', async () => {
+    const app = makeLanApp()
+    const stolen = await app.pair('Stolen phone')
+    const kept = await app.pair('Pixel 8')
+    const rows = app.db.prepare('SELECT * FROM lan_devices WHERE id = 1').all() as Array<Record<string, unknown>>
+    expect((await app.local('/api/lan/devices/1', { method: 'DELETE' })).status).toBe(204)
+    const forgotten = path.join(app.dir, 'forgotten')
+    expect(fs.readFileSync(forgotten, 'utf8')).toBe('1\n')
+    expectOwnerOnly(forgotten)
+    // The backup's row comes back, and Binder starts again: the stolen phone's cookie still doesn't work.
+    const insert = app.db.prepare(
+      `INSERT INTO lan_devices (id, name, token_hash, created_at, last_seen_at, last_ip, origin, user_agent)
+       VALUES (@id, @name, @token_hash, @created_at, @last_seen_at, @last_ip, @origin, @user_agent)`,
+    )
+    for (const row of rows) insert.run(row)
+    const restarted = makeLanApp({ db: app.db }, { dir: app.dir })
+    expect((await restarted.request('/api/collection/stats', {}, { cookie: stolen })).status).toBe(401)
+    expect((await restarted.request('/api/collection/stats', {}, { cookie: kept })).status).toBe(200)
+    expect(restarted.lan.devices.list().map((d) => d.name)).toEqual(['Pixel 8'])
+    // Forgetting every phone changes the secret, so the list is no longer needed.
+    expect((await restarted.local('/api/lan/forget-all', { method: 'POST' })).status).toBe(204)
+    expect(fs.existsSync(forgotten)).toBe(false)
+  })
+
+  it("drops the phones of a library moved or brought back without its lan/ folder, which can't be let in again", async () => {
+    const app = makeLanApp()
+    const cookie = await app.pair('Pixel 8')
+    const count = () => app.db.prepare('SELECT count(*) FROM lan_devices').pluck().get()
+    // A secret that's there but can't be read keeps them: it may be readable again next time.
+    const unreadable = makeLanApp({ db: app.db })
+    fs.mkdirSync(path.join(unreadable.dir, 'secret'), { recursive: true })
+    expect((await body<LanStatus>(await unreadable.local('/api/lan'))).devices).toHaveLength(1)
+    // binder.db somewhere else, with no lan/ beside it.
+    const moved = makeLanApp({ db: app.db })
+    expect((await moved.request('/api/collection/stats', {}, { cookie })).status).toBe(401)
+    expect((await body<LanStatus>(await moved.local('/api/lan'))).devices).toEqual([])
+    expect(count()).toBe(0)
+    expect(fs.existsSync(moved.dir)).toBe(false)
   })
 
   it('turns phone access on and off, and picks the address phones open', async () => {

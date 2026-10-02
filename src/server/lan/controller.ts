@@ -62,16 +62,22 @@ export interface LanController {
   log: (line: string) => void
   status(): LanStatus
   summary(): LanSummary
+  /** Whether Binder listens for phones now. */
+  listening(): boolean
   /** The address phones open (`http://192.168.1.5:4322`) while Binder listens for them, else null. */
   url(): string | null
   /** Whether phones are on HTTPS; false until HTTPS is turned on. */
   https(): boolean
-  /** Turns phone access on or off, and picks the address phones open (null: the recommended one). */
+  /**
+   * Turns phone access on or off, and picks the address phones open (null: the recommended one). Changes are made one
+   * at a time, in the order they came, so turning it off while it's still starting leaves it off.
+   */
   update(change: { enabled?: boolean; address?: string | null }): Promise<LanStatus>
   /** Opens a pairing window, when Binder is listening for phones. */
   openPairing(): LanPairing
   /** Starts listening when phone access was left on. Never throws: a failure is logged and kept in the status. */
   resume(): Promise<void>
+  /** Stops listening for phones (Binder is stopping), after any change still being made. */
   stop(): Promise<void>
 }
 
@@ -110,6 +116,16 @@ export function createLanController(options: LanOptions): LanController {
   })
   const pairing = createPairing({ now })
   const minute = 60_000
+  /** The last change to phone access (update, resume, stop), which the next one waits for. */
+  let changing: Promise<unknown> = Promise.resolve()
+
+  function serially<T>(change: () => Promise<T>): Promise<T> {
+    const next = changing.then(change)
+    changing = next.catch(() => {})
+    return next
+  }
+
+  const enabled = () => !off && getMeta(db, 'lan_enabled') === '1'
 
   function changed() {
     lastUrl = controller.url()
@@ -160,10 +176,10 @@ export function createLanController(options: LanOptions): LanController {
     status() {
       const port = listener.port
       return {
-        enabled: !off && getMeta(db, 'lan_enabled') === '1',
+        enabled: enabled(),
         https: false,
         port,
-        httpsPort: off ? 0 : port + 1,
+        httpsPort: off || port === 0 ? 0 : port + 1,
         listening: listener.listening,
         error: off ? OFF : listener.error,
         addresses: addresses.list(),
@@ -181,12 +197,13 @@ export function createLanController(options: LanOptions): LanController {
       const chosen = controller.url()
       const others = addresses.list().map((a) => `http://${a.address}:${listener.port}`)
       return {
-        enabled: !off && getMeta(db, 'lan_enabled') === '1',
+        enabled: enabled(),
         listening: listener.listening,
         urls: chosen ? [chosen, ...others.filter((url) => url !== chosen)] : [],
         error: off ? OFF : listener.error,
       }
     },
+    listening: () => listener.listening,
     url() {
       const at = listener.listening ? address() : null
       return at ? `http://${at}:${listener.port}` : null
@@ -197,18 +214,22 @@ export function createLanController(options: LanOptions): LanController {
         throw new ApiError(400, 'bad_address', `${change.address} isn't one of this PC's addresses`)
       }
       if (change.enabled && off) throw new ApiError(409, 'lan_off', OFF)
-      if (change.address !== undefined) {
-        setMeta(db, 'lan_address', change.address)
-        if (listener.listening) changed()
-      }
-      if (change.enabled !== undefined) setMeta(db, 'lan_enabled', change.enabled ? '1' : '0')
-      if (change.enabled === true && !listener.listening) await start()
-      if (change.enabled === false && listener.listening) {
-        await stop()
-        log('[phone] Phone access is off')
-        changed()
-      }
-      return controller.status()
+      return serially(async () => {
+        if (change.address !== undefined) {
+          setMeta(db, 'lan_address', change.address)
+          if (listener.listening) changed()
+        }
+        const was = enabled() || listener.listening
+        if (change.enabled !== undefined) setMeta(db, 'lan_enabled', change.enabled ? '1' : '0')
+        if (change.enabled === true && !listener.listening) await start()
+        if (change.enabled === false && was) {
+          // Whether it was listening or had failed to: either way it's off now, and its error with it.
+          await stop()
+          log('[phone] Phone access is off')
+          changed()
+        }
+        return controller.status()
+      })
     },
     openPairing() {
       const url = controller.url()
@@ -220,10 +241,12 @@ export function createLanController(options: LanOptions): LanController {
       }
       return pairing.open((key) => `${url}/pair#k=${key}`)
     },
-    async resume() {
-      if (!off && getMeta(db, 'lan_enabled') === '1') await start()
+    resume() {
+      return serially(async () => {
+        if (enabled()) await start()
+      })
     },
-    stop,
+    stop: () => serially(stop),
   }
   return controller
 }

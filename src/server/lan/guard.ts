@@ -203,6 +203,8 @@ export interface LanGuard {
   hostname: string
   /** The address phones open, for a request that named another host. */
   url(): string | null
+  /** Whether Binder listens for phones: a phone's request through the dev server's proxy is let in only then. */
+  listening(): boolean
 }
 
 /** A device's cookie is sent again, with a new 400 days, once a day while it's used, so a phone in use stays paired. */
@@ -217,7 +219,8 @@ const COOKIE_RESEND_MS = 24 * 60 * 60_000
  *   library. An API request that changes something must name Binder's own page as its Origin, and a phone's browser
  *   sends no other sign over HTTP, so the Origin is required; a cross-site read is refused too (403 `cross_site`).
  *   Then the route's policy: `public` routes are rate-limited by address; any other needs a paired phone's cookie
- *   (401 `unpaired`, and 429 after too many from one address), and `pc` routes refuse a phone (403 `pc_only`).
+ *   (401 `unpaired`, and 429 after too many from one address; through a proxy, only while Binder listens for
+ *   phones), and `pc` routes refuse a phone (403 `pc_only`).
  *   A phone's request bodies are limited in size (413 `too_large`).
  */
 export function guard(lan: LanGuard | undefined): MiddlewareHandler<AppEnv> {
@@ -259,7 +262,10 @@ export function guard(lan: LanGuard | undefined): MiddlewareHandler<AppEnv> {
     const peer = peerAddress(c) ?? 'unknown'
     const policy = lanPolicy(method, c.req.path) ?? 'pc'
     const cookie = readDeviceCookie(c)
-    const device = lan?.devices.verify(cookie) ?? null
+    // A phone's request through the dev server's proxy comes in on this computer's listener, which runs whether phone
+    // access is on or not: its cookie counts only while Binder listens for phones, as on the phones' own listener.
+    const on = c.env?.listener === 'lan' || (lan?.listening() ?? false)
+    const device = on ? (lan?.devices.verify(cookie) ?? null) : null
     let client: Client
     if (policy === 'public') {
       const wait = lan?.limits.public.take(peer)
@@ -268,7 +274,13 @@ export function guard(lan: LanGuard | undefined): MiddlewareHandler<AppEnv> {
     } else if (!device) {
       const wait = lan?.limits.unpaired.take(peer)
       if (wait) throw rateLimited(wait)
-      throw new ApiError(401, 'unpaired', 'Pair this phone with Binder: on the PC, open Settings → Phone access → Pair a phone')
+      throw new ApiError(
+        401,
+        'unpaired',
+        on
+          ? 'Pair this phone with Binder: on the PC, open Settings → Phone access → Pair a phone'
+          : 'Phone access is off: on the PC, turn it on in Settings → Phone access',
+      )
     } else if (policy === 'pc') {
       throw new ApiError(403, 'pc_only', 'Change this on the PC running Binder')
     } else {

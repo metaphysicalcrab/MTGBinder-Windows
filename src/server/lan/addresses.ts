@@ -29,10 +29,21 @@ function inBlock(address: string, base: string, bits: number): boolean {
   return Math.floor(toNumber(address) / size) === Math.floor(toNumber(base) / size)
 }
 
+const PRIVATE_BLOCKS = [
+  { base: '10.0.0.0', bits: 8 },
+  { base: '172.16.0.0', bits: 12 },
+  { base: '192.168.0.0', bits: 16 },
+]
+
+/** The private network block an IPv4 address is in (its prefix length), or undefined. */
+function privateBlockBits(address: string): number | undefined {
+  if (!net.isIPv4(address)) return undefined
+  return PRIVATE_BLOCKS.find((block) => inBlock(address, block.base, block.bits))?.bits
+}
+
 /** A private network's address (10/8, 172.16/12, 192.168/16): a home or office network, never the internet. */
 export function isPrivateIPv4(address: string): boolean {
-  if (!net.isIPv4(address)) return false
-  return inBlock(address, '10.0.0.0', 8) || inBlock(address, '172.16.0.0', 12) || inBlock(address, '192.168.0.0', 16)
+  return privateBlockBits(address) !== undefined
 }
 
 /**
@@ -41,12 +52,20 @@ export function isPrivateIPv4(address: string): boolean {
  */
 const VIRTUAL =
   /vethernet|hyper-v|wsl|default switch|virtualbox|vboxnet|vmware|vmnet|docker|^br-|^virbr|^veth|utun|tailscale|zerotier|^zt|bluetooth|\btap\b|vpn|^tun/i
+/**
+ * A Hyper-V switch someone made (`vEthernet (External Switch)`), rather than one Windows makes for its own machines
+ * (WSL's, the Default Switch, containers' NAT): it may be External, holding the PC's address on its real network.
+ */
+const OWN_SWITCH = /^vethernet \((?!wsl|default switch|nat\)|dockernat)/i
 const WIFI = /wi-?fi|wlan|wireless|airport|^wl/i
 const ETHERNET = /ethernet|^en\d|^eth|^en[ops]/i
 
-/** Wi-Fi first (the phone is on it), then Ethernet, then other adapters, then virtual ones. */
+/**
+ * Wi-Fi first (the phone is on it), then Ethernet, then other adapters, then virtual ones,
+ * a Hyper-V switch someone made before the rest.
+ */
 function rank(name: string): number {
-  if (VIRTUAL.test(name)) return 3
+  if (VIRTUAL.test(name)) return OWN_SWITCH.test(name) ? 3 : 4
   if (WIFI.test(name)) return 0
   if (ETHERNET.test(name)) return 1
   return 2
@@ -67,12 +86,18 @@ export function lanAddresses(interfaces: ReturnType<Interfaces>): LanAddress[] {
   return found.map((a, i) => ({ address: a.address, interface: a.interface, recommended: i === best }))
 }
 
-/** The networks this computer is on (each non-internal IPv4 address and its netmask). */
+/**
+ * The private networks this computer is on: each non-internal private IPv4 address and its netmask, no wider than its
+ * private block (a VPN's /0 is its 10/8). A public address's network is the internet's, which never may connect.
+ */
 function subnets(interfaces: ReturnType<Interfaces>): Array<{ address: string; bits: number }> {
   return Object.values(interfaces).flatMap((infos) =>
-    (infos ?? [])
-      .filter((info) => info.family === 'IPv4' && !info.internal)
-      .map((info) => ({ address: info.address, bits: Number(info.cidr?.split('/')[1] ?? prefixLength(info.netmask)) })),
+    (infos ?? []).flatMap((info) => {
+      const block = info.family === 'IPv4' && !info.internal ? privateBlockBits(info.address) : undefined
+      if (block === undefined) return []
+      const bits = Number(info.cidr?.split('/')[1] ?? prefixLength(info.netmask))
+      return [{ address: info.address, bits: Math.max(block, bits) }]
+    }),
   )
 }
 
@@ -89,7 +114,7 @@ const MISS_READ_MS = 2_000
 export interface AddressBook {
   /** The addresses phones can open Binder at, best first (lanAddresses), read again when 30 s old. */
   list(): LanAddress[]
-  /** Whether a peer may connect: this computer, or a device on one of its networks (not the internet). */
+  /** Whether a peer may connect: this computer, or a device on one of its private networks (not the internet). */
   allows(remote: string | undefined): boolean
   /** A request named this address as its Host: when it isn't one Binder knows, the addresses are read again. */
   noticeHost(hostname: string): void

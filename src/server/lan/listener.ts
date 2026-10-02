@@ -16,9 +16,9 @@ export interface LanListener {
   /** Stops listening, closing the connections phones keep open. */
   stop(): Promise<void>
   readonly listening: boolean
-  /** The port: the one it was given, or the one the system picked for 0 once listening. */
+  /** The port: the one it was given (0 when that's no port), or the one the system picked for 0 once listening. */
   readonly port: number
-  /** "Couldn't listen on port 4322: …", from the last start; null once it listens. */
+  /** "Couldn't listen on port 4322: …", from the last start; null once it listens, and once it's stopped. */
   readonly error: string | null
 }
 
@@ -49,9 +49,10 @@ export function lanListenFailure(err: NodeJS.ErrnoException, port: number, platf
  * their rules. HTTP; one place makes the server, for HTTPS to replace (spec §5.10).
  */
 export function createLanListener(options: LanListenerOptions): LanListener {
+  const valid = Number.isInteger(options.port) && options.port >= 0 && options.port <= 65535
   let server: Server | null = null
   let starting: Promise<void> | null = null
-  let port = options.port
+  let port = valid ? options.port : 0
   let error: string | null = null
 
   function listen(): Promise<Server> {
@@ -70,7 +71,7 @@ export function createLanListener(options: LanListenerOptions): LanListener {
   }
 
   async function start() {
-    if (!Number.isInteger(options.port) || options.port < 0 || options.port > 65535) {
+    if (!valid) {
       error = "Couldn't listen for phones: BINDER_LAN_PORT must be a port number from 1 to 65535"
       return
     }
@@ -94,7 +95,8 @@ export function createLanListener(options: LanListenerOptions): LanListener {
       await starting
       const closing = server
       server = null
-      port = options.port
+      port = valid ? options.port : 0
+      error = null // a failed start's, which no longer applies once phone access is off
       if (!closing) return
       await new Promise<void>((resolve) => {
         closing.close(() => resolve())
