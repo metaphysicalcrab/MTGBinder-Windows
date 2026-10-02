@@ -20,7 +20,7 @@ export const { dbPath: DB_PATH, backupDir: BACKUP_DIR } = libraryPaths(DATA_DIR)
 export const WEB_DIST_DIR = path.join(ROOT_DIR, 'dist', 'web')
 export const HOST = '127.0.0.1'
 export const PORT = Number(process.env.PORT ?? 4321)
-/** The OCR helper's Swift source and the binary built from it (spec §5.1.4). */
+/** The Mac's OCR helper: its Swift source, and the binary built from it (spec §5.1.4). */
 export const OCR_SOURCE = path.join(ROOT_DIR, 'native', 'ocr.swift')
 export const OCR_BINARY = path.join(ROOT_DIR, 'bin', 'ocr')
 /** Where `pnpm ocr:bench` keeps the card images it downloads (spec §5.1.6). */
