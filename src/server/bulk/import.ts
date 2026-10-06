@@ -12,6 +12,7 @@ import { insertCardRows, rebuildCardNames } from '../cards/repo.ts'
 import { createTokenStaging, dropTokenStaging, insertTokenLinks, replaceTokens } from '../cards/tokens.ts'
 import type { DB } from '../db/index.ts'
 import { getMeta, setMeta } from '../db/meta.ts'
+import { removeWithRetry, renameWithRetryAsync } from '../fs-retry.ts'
 import { ScryfallError, type ScryfallClient } from '../scryfall/client.ts'
 import type { ScryfallBulkData, ScryfallCard } from '../scryfall/types.ts'
 
@@ -206,7 +207,8 @@ export function createBulkImporter(deps: BulkImporterDeps): BulkImporter {
         } catch (err) {
           throw new Error(`Card data download failed: ${err instanceof Error ? err.message : String(err)}`, { cause: err })
         }
-        fs.renameSync(partial, file)
+        // On Windows, antivirus scans the download as it closes: the rename waits that out (see fs-retry).
+        await renameWithRetryAsync(partial, file)
       }
 
       state = 'importing'
@@ -241,7 +243,15 @@ export function createBulkImporter(deps: BulkImporterDeps): BulkImporter {
       lastError = message
       // A kept file that fails to import may be damaged; delete it so the next refresh downloads a fresh copy. A
       // database error says nothing about the file, which is kept.
-      if (reusedFile && !isDatabaseError(err)) fs.rmSync(keptFile, { force: true })
+      if (reusedFile && !isDatabaseError(err)) {
+        try {
+          removeWithRetry(keptFile)
+        } catch (rmErr) {
+          // Still held open (on Windows, by antivirus or the indexer): the next refresh imports it again, and fails the
+          // same way or works. The refresh's own error is still recorded below, and refresh() never rejects.
+          log(`Could not delete the card data file: ${rmErr instanceof Error ? rmErr.message : String(rmErr)}`)
+        }
+      }
       try {
         setMeta(db, 'bulk_error', message)
       } catch (metaErr) {

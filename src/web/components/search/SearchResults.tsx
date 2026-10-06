@@ -34,7 +34,7 @@ export function SearchResults({ page, state, fetching, onChange, libraryPage = f
   const emptyLaterPage = page.cards.length === 0 && state.page > 1
   const sorts = (Object.keys(SORT_LABELS) as SearchSort[]).filter((s) => library || isCardSort(s))
   const button = (active: boolean) =>
-    `rounded-md px-2.5 py-1 text-xs ${active ? 'bg-stone-700 text-stone-50' : 'text-stone-400 hover:text-stone-100'}`
+    `rounded-md px-2.5 py-1 text-xs pointer-coarse:px-3 pointer-coarse:py-2 pointer-coarse:text-sm ${active ? 'bg-stone-700 text-stone-50' : 'text-stone-400 hover:text-stone-100'}`
 
   return (
     <section aria-busy={fetching} className={fetching ? 'opacity-70 transition-opacity' : undefined}>
@@ -50,7 +50,7 @@ export function SearchResults({ page, state, fetching, onChange, libraryPage = f
           <select
             value={state.sort}
             onChange={(e) => onChange({ sort: e.target.value as SearchSort })}
-            className="rounded-md border border-stone-700 bg-stone-900 px-2 py-1 text-stone-100"
+            className="rounded-md border border-stone-700 bg-stone-900 px-2 py-1 text-stone-100 pointer-coarse:py-2"
           >
             {sorts.map((s) => (
               <option key={s} value={s}>
@@ -62,7 +62,7 @@ export function SearchResults({ page, state, fetching, onChange, libraryPage = f
         <button
           onClick={() => onChange({ dir: state.dir === 'asc' ? 'desc' : 'asc' })}
           aria-label={state.dir === 'asc' ? 'Ascending; switch to descending' : 'Descending; switch to ascending'}
-          className="rounded-md border border-stone-700 px-2 py-1 text-stone-300 hover:bg-stone-800"
+          className="rounded-md border border-stone-700 px-2 py-1 text-stone-300 hover:bg-stone-800 pointer-coarse:min-h-10 pointer-coarse:min-w-10"
         >
           {state.dir === 'asc' ? '↑' : '↓'}
         </button>
@@ -120,7 +120,7 @@ export function SearchResults({ page, state, fetching, onChange, libraryPage = f
           <button
             disabled={state.page <= 1}
             onClick={() => onChange({ page: state.page - 1 })}
-            className="rounded-md border border-stone-700 px-3 py-1.5 text-stone-200 hover:bg-stone-800 disabled:opacity-40"
+            className="rounded-md border border-stone-700 px-3 py-1.5 text-stone-200 hover:bg-stone-800 disabled:opacity-40 pointer-coarse:py-2.5"
           >
             ← Previous
           </button>
@@ -130,7 +130,7 @@ export function SearchResults({ page, state, fetching, onChange, libraryPage = f
           <button
             disabled={!page.hasMore}
             onClick={() => onChange({ page: state.page + 1 })}
-            className="rounded-md border border-stone-700 px-3 py-1.5 text-stone-200 hover:bg-stone-800 disabled:opacity-40"
+            className="rounded-md border border-stone-700 px-3 py-1.5 text-stone-200 hover:bg-stone-800 disabled:opacity-40 pointer-coarse:py-2.5"
           >
             Next →
           </button>
@@ -174,52 +174,78 @@ function ResultGrid({ page, showFinish }: { page: SearchPage; showFinish: boolea
   )
 }
 
+/** The List layout: a table from md up, and below it (a phone) a list of two-line rows, each the table's row folded. */
 function ResultList({ page, library }: { page: SearchPage; library: boolean }) {
   const drawer = useCardDrawer()
   return (
-    <div className="overflow-x-auto rounded-lg border border-stone-800">
-      <table className="w-full min-w-[48rem] text-left text-sm">
-        <thead className="bg-stone-900/80 text-xs tracking-wide text-stone-400 uppercase">
-          <tr>
-            <th className="px-3 py-2 font-medium">Name</th>
-            <th className="px-3 py-2 font-medium">Type</th>
-            <th className="px-3 py-2 font-medium">Set</th>
-            <th className="px-3 py-2 font-medium">P/T</th>
-            <th className="px-3 py-2 text-right font-medium">Price</th>
-            {library && <th className="px-3 py-2 text-right font-medium">Copies</th>}
-            <th className="px-3 py-2 font-medium">Mine</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-stone-800/70">
-          {page.cards.map((card) => (
-            <tr
-              key={`${card.cardId}-${card.finish ?? ''}`}
-              onClick={() => drawer.open(card.cardId)}
-              className="cursor-pointer hover:bg-stone-900"
-            >
-              <td className="px-3 py-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-stone-100">{card.name}</span>
+    <>
+      <ul className="divide-y divide-stone-800/70 rounded-lg border border-stone-800 md:hidden">
+        {page.cards.map((card) => {
+          const stats = card.loyalty ?? (card.power !== null && card.toughness !== null ? `${card.power}/${card.toughness}` : null)
+          return (
+            <li key={`${card.cardId}-${card.finish ?? ''}`}>
+              <button onClick={() => drawer.open(card.cardId)} className="block w-full space-y-1 px-3 py-2.5 text-left text-sm">
+                <span className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate text-stone-100">{card.name}</span>
                   <ManaText text={card.manaCost} className="shrink-0 text-xs" />
-                </div>
-              </td>
-              <td className="max-w-56 truncate px-3 py-2 text-stone-400">{card.typeLine}</td>
-              <td className="px-3 py-2 font-mono text-xs text-stone-400 uppercase">
-                {card.setCode}
-                {card.finish && card.finish !== 'nonfoil' && <span className="ml-1 text-amber-300 normal-case">{card.finish}</span>}
-              </td>
-              <td className="px-3 py-2 text-stone-400">
-                {card.loyalty ?? (card.power !== null && card.toughness !== null ? `${card.power}/${card.toughness}` : '')}
-              </td>
-              <td className="px-3 py-2 text-right text-stone-300 tabular-nums">{formatUsd(card.priceUsd)}</td>
-              {library && <td className="px-3 py-2 text-right text-stone-300 tabular-nums">{card.quantity}</td>}
-              <td className="px-3 py-2">
-                <OwnershipBadge ownership={card.ownership} />
-              </td>
+                </span>
+                <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-stone-400">
+                  <span className="font-mono uppercase">{card.setCode}</span>
+                  {card.finish && card.finish !== 'nonfoil' && <span className="text-amber-300">{card.finish}</span>}
+                  {stats && <span>{stats}</span>}
+                  <span className="text-stone-300 tabular-nums">{formatUsd(card.priceUsd)}</span>
+                  {library && <span className="text-stone-300 tabular-nums">×{card.quantity}</span>}
+                  <OwnershipBadge ownership={card.ownership} />
+                </span>
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+      <div className="hidden overflow-x-auto rounded-lg border border-stone-800 md:block">
+        <table className="w-full min-w-[48rem] text-left text-sm">
+          <thead className="bg-stone-900/80 text-xs tracking-wide text-stone-400 uppercase">
+            <tr>
+              <th className="px-3 py-2 font-medium">Name</th>
+              <th className="px-3 py-2 font-medium">Type</th>
+              <th className="px-3 py-2 font-medium">Set</th>
+              <th className="px-3 py-2 font-medium">P/T</th>
+              <th className="px-3 py-2 text-right font-medium">Price</th>
+              {library && <th className="px-3 py-2 text-right font-medium">Copies</th>}
+              <th className="px-3 py-2 font-medium">Mine</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody className="divide-y divide-stone-800/70">
+            {page.cards.map((card) => (
+              <tr
+                key={`${card.cardId}-${card.finish ?? ''}`}
+                onClick={() => drawer.open(card.cardId)}
+                className="cursor-pointer hover:bg-stone-900"
+              >
+                <td className="px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-stone-100">{card.name}</span>
+                    <ManaText text={card.manaCost} className="shrink-0 text-xs" />
+                  </div>
+                </td>
+                <td className="max-w-56 truncate px-3 py-2 text-stone-400">{card.typeLine}</td>
+                <td className="px-3 py-2 font-mono text-xs text-stone-400 uppercase">
+                  {card.setCode}
+                  {card.finish && card.finish !== 'nonfoil' && <span className="ml-1 text-amber-300 normal-case">{card.finish}</span>}
+                </td>
+                <td className="px-3 py-2 text-stone-400">
+                  {card.loyalty ?? (card.power !== null && card.toughness !== null ? `${card.power}/${card.toughness}` : '')}
+                </td>
+                <td className="px-3 py-2 text-right text-stone-300 tabular-nums">{formatUsd(card.priceUsd)}</td>
+                {library && <td className="px-3 py-2 text-right text-stone-300 tabular-nums">{card.quantity}</td>}
+                <td className="px-3 py-2">
+                  <OwnershipBadge ownership={card.ownership} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   )
 }

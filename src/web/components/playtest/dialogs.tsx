@@ -1,17 +1,22 @@
 import { useRef, useState } from 'react'
 import { kindOf } from '../../../shared/playtest/placement.ts'
 import type { CardData, Dest, GameState, SeatIndex } from '../../../shared/playtest/types.ts'
+import { useCoarsePointer, useMediaQuery } from '../../lib/platform.ts'
 import { tokenName } from '../../lib/playtest-board.ts'
 import { useTokenSearch } from '../../lib/playtest.ts'
 import { useDebounced } from '../../lib/use-debounced.ts'
 import { CardView } from './CardView.tsx'
 import { Modal } from './Menu.tsx'
 
-/** The playtest's dialogs (spec §5.9.4, §5.9.5, §5.9.8). */
+/** The playtest's dialogs (spec §5.9.4, §5.9.5, §5.9.8). A finger's buttons and fields are taller (M13). */
 
-const button = 'rounded-md border border-stone-700 bg-stone-800 px-3 py-1.5 text-sm text-stone-100 hover:bg-stone-700 disabled:opacity-40'
-const primary = 'rounded-md border border-amber-600 bg-amber-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-600 disabled:opacity-40'
-const field = 'rounded-md border border-stone-700 bg-stone-900 px-2 py-1 text-stone-100'
+const button = 'rounded-md border border-stone-700 bg-stone-800 px-3 py-1.5 text-sm text-stone-100 hover:bg-stone-700 disabled:opacity-40 pointer-coarse:py-2'
+const primary =
+  'rounded-md border border-amber-600 bg-amber-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-600 disabled:opacity-40 pointer-coarse:py-2'
+const field = 'rounded-md border border-stone-700 bg-stone-900 px-2 py-1 text-stone-100 pointer-coarse:py-2'
+/** LookDialog's ↑, ↓ and To top. */
+const nudge =
+  'rounded border border-stone-700 bg-stone-800 px-2 text-sm text-stone-200 hover:bg-stone-700 disabled:opacity-30 disabled:hover:bg-stone-800 pointer-coarse:min-h-9 pointer-coarse:min-w-9'
 
 /** "How many?" for drawing, milling, or looking at several cards. */
 export function CountDialog({
@@ -67,7 +72,8 @@ const LOOK_PLACES: Array<[LookPlace, string]> = [
 
 /**
  * Looking at the top cards of my library (spec §5.9.4): each card goes to the top, the bottom, the graveyard, the
- * hand, or exile. The cards kept on top stay in the order shown, first on top; drag them to change it. Scry and
+ * hand, or exile. The cards kept on top stay in the order shown, first on top; drag them, or move them with their ↑
+ * and ↓ (a finger's drag, which the browser may take for a scroll, needn't be relied on), to change it. Scry and
  * surveil are this.
  */
 export function LookDialog({
@@ -86,16 +92,26 @@ export function LookDialog({
   const [order, setOrder] = useState(() => game.seats[seat]!.library.slice(0, count))
   const [places, setPlaces] = useState<Record<string, LookPlace>>(() => Object.fromEntries(order.map((id) => [id, 'top'])))
   const [dragging, setDragging] = useState<string | null>(null)
+  const coarse = useCoarsePointer()
+  // Smaller cards on a phone, or a window too short for two rows of the large ones.
+  const small = useMediaQuery('(width < 40rem), (height < 40rem)')
   const submit = () => {
     const placed: Record<LookPlace, string[]> = { top: [], bottom: [], graveyard: [], hand: [], exile: [] }
     for (const id of order) placed[places[id]!].push(id)
     onClose()
     onSubmit(placed)
   }
+  const moveTo = (id: string, at: number) =>
+    setOrder((list) => {
+      const next = list.filter((x) => x !== id)
+      next.splice(at, 0, id)
+      return next
+    })
   return (
     <Modal title={`The top ${order.length === 1 ? 'card' : `${order.length} cards`} of your library`} onClose={onClose} wide>
       <p className="mb-3 text-sm text-stone-400">
-        The first card is the top of your library. Drag the cards to change their order, then choose where each goes.
+        The first card is the top of your library. {coarse ? 'Move the cards with ↑ and ↓' : 'Drag the cards (or use ↑ and ↓)'} to change their
+        order, then choose where each goes.
       </p>
       <ol className="flex flex-wrap gap-3">
         {order.map((id, i) => (
@@ -116,7 +132,24 @@ export function LookDialog({
             className={`flex cursor-grab flex-col items-center gap-1 ${dragging === id ? 'opacity-50' : ''}`}
           >
             <span className="text-xs text-stone-500">{i + 1}</span>
-            <CardView data={game.data[id]!} height={220} large />
+            <CardView data={game.data[id]!} height={small ? 160 : 220} large />
+            <div className="flex gap-1">
+              <button aria-label={`${game.data[id]!.name} up one`} title="Up one, nearer the top" disabled={i === 0} onClick={() => moveTo(id, i - 1)} className={nudge}>
+                ↑
+              </button>
+              <button
+                aria-label={`${game.data[id]!.name} down one`}
+                title="Down one, nearer the bottom"
+                disabled={i === order.length - 1}
+                onClick={() => moveTo(id, i + 1)}
+                className={nudge}
+              >
+                ↓
+              </button>
+              <button aria-label={`${game.data[id]!.name} to the top`} disabled={i === 0} onClick={() => moveTo(id, 0)} className={nudge}>
+                To top
+              </button>
+            </div>
             <select
               aria-label={`Where ${game.data[id]!.name} goes`}
               value={places[id]}
@@ -318,7 +351,7 @@ export function CounterDialog({
                 // So Enter adds it, rather than pressing this button again.
                 nameRef.current?.focus()
               }}
-              className={`rounded-full border px-2.5 py-0.5 text-xs ${name.trim() === c ? 'border-amber-500 bg-amber-700/40 text-amber-100' : 'border-stone-700 bg-stone-900 text-stone-300 hover:bg-stone-800'}`}
+              className={`rounded-full border px-2.5 py-0.5 text-xs pointer-coarse:py-1.5 ${name.trim() === c ? 'border-amber-500 bg-amber-700/40 text-amber-100' : 'border-stone-700 bg-stone-900 text-stone-300 hover:bg-stone-800'}`}
             >
               {c}
             </button>

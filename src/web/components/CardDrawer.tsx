@@ -66,13 +66,16 @@ function DrawerPanel({ cardId, onSelectPrinting, onClose }: { cardId: string; on
         aria-modal="true"
         aria-label={data?.card.name ?? 'Card details'}
         aria-busy={isPlaceholderData}
-        className="relative flex h-full w-full max-w-3xl flex-col overflow-y-auto border-l border-stone-800 bg-stone-950 shadow-2xl outline-none"
+        className="relative flex h-full w-full max-w-3xl flex-col overflow-y-auto overscroll-contain border-l border-stone-800 bg-stone-950 pb-[env(safe-area-inset-bottom)] shadow-2xl outline-none"
       >
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-stone-800 bg-stone-950/95 px-5 py-3">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-stone-800 bg-stone-950/95 px-4 py-3 sm:px-5">
           <span className="text-xs tracking-[0.2em] text-stone-500 uppercase">
             Card{isPlaceholderData && <span className="ml-2 tracking-normal normal-case">loading…</span>}
           </span>
-          <button onClick={onClose} className="rounded px-2 py-1 text-sm text-stone-400 hover:bg-stone-800 hover:text-stone-100">
+          <button
+            onClick={onClose}
+            className="rounded px-2 py-1 text-sm text-stone-400 hover:bg-stone-800 hover:text-stone-100 pointer-coarse:-my-1.5 pointer-coarse:px-3 pointer-coarse:py-2.5"
+          >
             Close ✕
           </button>
         </div>
@@ -105,42 +108,57 @@ function CardDetailView({ detail, onSelectPrinting }: { detail: CardDetail; onSe
       ? card.faces
       : [{ name: card.name, manaCost: card.manaCost, typeLine: card.typeLine, oracleText: card.oracleText, power: card.power, toughness: card.toughness, loyalty: card.loyalty, imageNormal: card.imageNormal }]
 
+  // Below sm (a phone) the image is small, beside its prices, and the sections marked order-1 move below Your copies
+  // and Add a copy, which then come straight after the card's text rather than a screen or two further down.
   return (
-    <div className="grid gap-6 p-5 sm:grid-cols-[minmax(0,15rem)_1fr]">
-      <div className="space-y-3">
-        {image ? (
-          <img src={image} alt={card.name} className="w-full rounded-xl shadow-xl shadow-black/60" />
-        ) : (
-          <div className="aspect-[63/88] rounded-xl bg-stone-900" />
-        )}
-        {faceImages.length > 1 && (
-          <button
-            onClick={() => setFaceIndex((i) => i + 1)}
-            className="w-full rounded-md border border-stone-700 py-1.5 text-sm text-stone-300 hover:bg-stone-800"
+    <div className="grid gap-5 p-4 sm:grid-cols-[minmax(0,15rem)_1fr] sm:gap-6 sm:p-5">
+      <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] items-start gap-4 sm:block sm:space-y-3">
+        <div className="space-y-3">
+          {image ? (
+            <img src={image} alt={card.name} className="w-full rounded-xl shadow-xl shadow-black/60" />
+          ) : (
+            <div className="aspect-[63/88] rounded-xl bg-stone-900" />
+          )}
+          {faceImages.length > 1 && (
+            <button
+              onClick={() => setFaceIndex((i) => i + 1)}
+              className="w-full rounded-md border border-stone-700 py-1.5 text-sm text-stone-300 hover:bg-stone-800 pointer-coarse:py-2.5"
+            >
+              Flip ↻
+            </button>
+          )}
+        </div>
+        <div className="space-y-3">
+          <PriceTable card={card} />
+          <a
+            href={card.scryfallUri}
+            target="_blank"
+            rel="noreferrer"
+            className="block text-center text-xs text-stone-500 hover:text-amber-400 pointer-coarse:py-3"
           >
-            Flip ↻
-          </button>
-        )}
-        <PriceTable card={card} />
-        <a href={card.scryfallUri} target="_blank" rel="noreferrer" className="block text-center text-xs text-stone-500 hover:text-amber-400">
-          View on Scryfall ↗
-        </a>
+            View on Scryfall ↗
+          </a>
+        </div>
       </div>
-      <div className="min-w-0 space-y-5">
+      <div className="flex min-w-0 flex-col gap-5 sm:block sm:space-y-5">
         {faces.map((face, i) => (
           <FaceBlock key={i} face={face} />
         ))}
-        <div className="text-sm text-stone-400">
+        <div className="order-1 text-sm text-stone-400 sm:order-none">
           <span className="text-stone-300">{card.setName}</span> · {card.setCode.toUpperCase()} #{card.collectorNumber} ·{' '}
           <span className="capitalize">{card.rarity}</span>
           {card.artist && <> · Illus. {card.artist}</>}
         </div>
-        <Legalities legalities={card.legalities} />
+        <div className="order-1 sm:order-none">
+          <Legalities legalities={card.legalities} />
+        </div>
         <YourCopies detail={detail} onSelectPrinting={onSelectPrinting} />
         <AddCopy key={card.id} card={card} printings={printings} />
-        <DeckList ownership={detail.ownership} />
-        <AddToDeck card={card} />
-        <PrintingList printings={printings} copies={copies} currentId={card.id} onSelect={onSelectPrinting} />
+        <div className="order-1 space-y-5 sm:order-none">
+          <DeckList ownership={detail.ownership} />
+          <AddToDeck card={card} />
+          <PrintingList printings={printings} copies={copies} currentId={card.id} onSelect={onSelectPrinting} />
+        </div>
       </div>
     </div>
   )
@@ -193,18 +211,24 @@ function PriceTable({ card }: { card: Card }) {
   )
 }
 
+/**
+ * Each format, colored by the card's status in it, and saying it in words too, for a finger (no tooltip) and for
+ * anyone who can't tell the colors apart: not legal struck through, banned and restricted named.
+ */
 function Legalities({ legalities }: { legalities: Record<string, string> }) {
   return (
     <div className="flex flex-wrap gap-1.5">
       {FORMATS.map((format) => {
         const status = legalities[format] ?? 'not_legal'
+        const said = status.replace('_', ' ')
         return (
           <span
             key={format}
-            title={status.replace('_', ' ')}
+            title={said}
             className={`rounded border px-2 py-0.5 text-xs capitalize ${LEGALITY_STYLE[status] ?? LEGALITY_STYLE.not_legal ?? ''}`}
           >
-            {format}
+            <span className={status === 'not_legal' ? 'line-through' : undefined}>{format}</span>
+            {status === 'banned' || status === 'restricted' ? ` · ${said}` : <span className="sr-only">: {said}</span>}
           </span>
         )
       })}
@@ -239,20 +263,21 @@ function PrintingList({
   return (
     <div>
       <h3 className={sectionHeading}>Printings ({printings.length})</h3>
-      <ul className="max-h-72 divide-y divide-stone-800/80 overflow-y-auto rounded-lg border border-stone-800">
+      {/* A list that scrolls inside the drawer only from sm up: on a phone it would catch the finger scrolling the drawer. */}
+      <ul className="divide-y divide-stone-800/80 rounded-lg border border-stone-800 sm:max-h-72 sm:overflow-y-auto sm:overscroll-contain">
         {printings.map((p) => (
           <li key={p.id}>
             <button
               onClick={() => onSelect(p.id)}
               aria-current={p.id === currentId ? 'true' : undefined}
-              className={`flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-stone-900 ${p.id === currentId ? 'bg-stone-900 text-amber-300' : 'text-stone-300'}`}
+              className={`flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-stone-900 pointer-coarse:py-3 ${p.id === currentId ? 'bg-stone-900 text-amber-300' : 'text-stone-300'}`}
             >
               <span className="w-12 shrink-0 font-mono text-xs text-stone-500 uppercase">{p.setCode}</span>
               <span className="min-w-0 flex-1 truncate">
                 {p.setName} <span className="text-stone-500">#{p.collectorNumber}</span>
               </span>
               {owned.has(p.id) && <span className="shrink-0 rounded bg-emerald-900/60 px-1.5 text-[11px] text-emerald-200">×{owned.get(p.id)}</span>}
-              <span className="shrink-0 text-xs text-stone-500">{p.releasedAt.slice(0, 4)}</span>
+              <span className="shrink-0 text-xs text-stone-500 max-sm:hidden">{p.releasedAt.slice(0, 4)}</span>
               <span className="w-20 shrink-0 text-right tabular-nums">
                 <PrintingPrice printing={p} />
               </span>

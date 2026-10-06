@@ -1,5 +1,4 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import Anthropic from '@anthropic-ai/sdk'
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
@@ -8,6 +7,8 @@ import { createKeyStore } from '../../src/server/ai/key-store.ts'
 import type { AiKeyStatus, ApiErrorBody, BackupStatus, Settings } from '../../src/shared/types.ts'
 import { body, makeApp } from '../helpers/app.ts'
 import { createTestDb } from '../helpers/db.ts'
+import { expectOwnerOnly } from '../helpers/private.ts'
+import { tempDir } from '../helpers/tmp.ts'
 
 const send = (app: ReturnType<typeof makeApp>, method: string, url: string, json: unknown) =>
   app.request(url, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(json) })
@@ -46,8 +47,7 @@ describe('the API key routes without a key store', () => {
 
 describe('backups (spec §5.6)', () => {
   it('says when the last backup was made and where they are, and backs up now', async () => {
-    const backupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'binder-backups-'))
-    onTestFinished(() => fs.rmSync(backupDir, { recursive: true, force: true }))
+    const backupDir = tempDir('binder-backups-')
     const app = makeApp({ db: createTestDb(), backupDir })
     expect(await body<BackupStatus>(await app.request('/api/settings/backups'))).toEqual({ lastBackupAt: null, folder: backupDir })
     const res = await app.request('/api/settings/backups', { method: 'POST' })
@@ -59,8 +59,7 @@ describe('backups (spec §5.6)', () => {
   })
 
   it('explains a backup that fails', async () => {
-    const backupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'binder-backups-'))
-    onTestFinished(() => fs.rmSync(backupDir, { recursive: true, force: true }))
+    const backupDir = tempDir('binder-backups-')
     const rename = vi.spyOn(fs, 'renameSync').mockImplementationOnce(() => {
       throw new Error('ENOSPC: no space left on device')
     })
@@ -95,8 +94,7 @@ describe('Anthropic API key (spec §5.6)', () => {
       },
     }) as unknown as Anthropic
   beforeEach(() => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'binder-env-'))
-    onTestFinished(() => fs.rmSync(dir, { recursive: true, force: true }))
+    const dir = tempDir('binder-env-')
     envPath = path.join(dir, '.env')
     fs.writeFileSync(envPath, 'OTHER_SETTING=1\n')
     app = makeApp({ ai: createAiClient(createKeyStore(envPath), fakeClient) })
@@ -108,7 +106,7 @@ describe('Anthropic API key (spec §5.6)', () => {
     const saved = await send(app, 'PUT', '/api/settings/ai', { apiKey: `  ${KEY} ` })
     expect(await body(saved)).toEqual({ configured: true, hint: '1234' })
     expect(fs.readFileSync(envPath, 'utf8')).toBe(`OTHER_SETTING=1\nANTHROPIC_API_KEY=${KEY}\n`)
-    expect(fs.statSync(envPath).mode & 0o777).toBe(0o600)
+    expectOwnerOnly(envPath)
     expect(JSON.stringify(await status())).not.toContain('good-key')
     // A new client reads the saved key back.
     expect(createAiClient(createKeyStore(envPath), fakeClient).status()).toEqual({ configured: true, hint: '1234' })

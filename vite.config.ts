@@ -15,6 +15,10 @@ export default defineConfig({
     port: 5173,
     // The API server's port: the one it listens on (PORT, else 4321). The same-origin guard needs the page's own
     // Host, so changeOrigin must stay false (the string shorthand turns it on, sending the target's Host instead).
-    proxy: { '/api': { target: `http://127.0.0.1:${process.env.PORT ?? 4321}`, changeOrigin: false } },
+    // xfwd adds the browser's address to X-Forwarded-For: with `vite --host`, a phone's requests reach the server
+    // from this computer, and that address is what tells the guard they're a phone's.
+    proxy: {
+      '/api': { target: `http://127.0.0.1:${process.env.PORT ?? 4321}`, changeOrigin: false, xfwd: true },
+    },
   },
 })

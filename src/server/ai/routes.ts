@@ -4,7 +4,8 @@ import { z } from 'zod'
 import type { ChatEvent, ThreadDetail } from '../../shared/types.ts'
 import type { DB } from '../db/index.ts'
 import { getDeckRow } from '../decks/repo.ts'
-import { ApiError, parseWith, pathId, readJson } from '../http.ts'
+import { ApiError, parseWith, pathId, readJson, type AppEnv } from '../http.ts'
+import type { DeviceStore } from '../lan/devices.ts'
 import type { Brainstorm } from './chat.ts'
 import { canContinue, chatItems, estimateCost, outgrown } from './history.ts'
 import { deleteThread, getMessages, getThread, listThreads, renameThread, startThread } from './threads.ts'
@@ -15,10 +16,23 @@ const RenameBody = z.object({ title: z.string().trim().min(1).max(100) }).strict
 const MessageBody = z.object({ text: z.string().trim().min(1).max(20_000) }).strict()
 const threadId = (param: string) => pathId(param, 'Conversation not found')
 
-/** /api/ai (spec §5.5): brainstorm conversations, and Claude's answers streamed as server-sent events. */
-export function aiRoutes(deps: { db: DB; brainstorm: Brainstorm; tools: BrainstormTools }): Hono {
+/**
+ * /api/ai (spec §5.5): brainstorm conversations, and Claude's answers streamed as server-sent events. A phone that's
+ * forgotten (`devices`) has its answers in progress stopped, as Stop does.
+ */
+export function aiRoutes(deps: {
+  db: DB
+  brainstorm: Brainstorm
+  tools: BrainstormTools
+  devices?: Pick<DeviceStore, 'onForget'>
+}): Hono<AppEnv> {
   const { db, brainstorm, tools } = deps
-  const routes = new Hono()
+  const routes = new Hono<AppEnv>()
+  /** Answers being streamed to phones, and to which phone. */
+  const phoneAnswers = new Map<AbortController, number>()
+  deps.devices?.onForget((id) => {
+    for (const [controller, device] of phoneAnswers) if (id === null || device === id) controller.abort()
+  })
 
   function detail(id: number): ThreadDetail {
     const thread = getThread(db, id)
@@ -35,12 +49,14 @@ export function aiRoutes(deps: { db: DB; brainstorm: Brainstorm; tools: Brainsto
   }
 
   /** Streams one answer. Problems found before it starts are ordinary JSON errors. */
-  function answer(c: Context, id: number, text: string | null) {
+  function answer(c: Context<AppEnv>, id: number, text: string | null) {
     brainstorm.check(id, text)
+    const client = c.get('client')
     return streamSSE(c, async (stream) => {
       const controller = new AbortController()
       // Closing the page stops the answer, as Stop does.
       stream.onAbort(() => controller.abort())
+      if (client?.kind === 'device') phoneAnswers.set(controller, client.id)
       let writes = Promise.resolve()
       const emit = (event: ChatEvent) => {
         writes = writes.then(() => stream.writeSSE({ data: JSON.stringify(event) }))
@@ -48,6 +64,7 @@ export function aiRoutes(deps: { db: DB; brainstorm: Brainstorm; tools: Brainsto
       try {
         await brainstorm.answer(id, text, emit, controller.signal)
       } finally {
+        phoneAnswers.delete(controller)
         // What was emitted still reaches the page, even if answering failed unexpectedly.
         await writes
       }

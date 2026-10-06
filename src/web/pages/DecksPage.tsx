@@ -16,7 +16,9 @@ const TABS: Array<[Tab, string]> = [
   ['all', 'All'],
 ]
 
-const input = 'rounded-md border border-stone-700 bg-stone-900 px-2 py-1.5 text-sm text-stone-100'
+const input = 'rounded-md border border-stone-700 bg-stone-900 px-2 py-1.5 text-sm text-stone-100 pointer-coarse:py-2.5'
+/** A card's small buttons: a finger's size on a touch screen. */
+const small = 'rounded-md px-2 py-1 pointer-coarse:px-3 pointer-coarse:py-2'
 
 /** Decks, filtered by status, with new / duplicate / delete (spec §5.4.1). */
 export function DecksPage() {
@@ -33,7 +35,7 @@ export function DecksPage() {
         <button
           onClick={() => setCreating(true)}
           disabled={creating}
-          className="rounded-md bg-amber-500 px-3 py-1.5 text-sm font-medium text-stone-950 hover:bg-amber-400 disabled:opacity-50"
+          className="rounded-md bg-amber-500 px-3 py-1.5 text-sm font-medium text-stone-950 hover:bg-amber-400 disabled:opacity-50 pointer-coarse:py-2.5"
         >
           New deck
         </button>
@@ -46,7 +48,7 @@ export function DecksPage() {
             role="tab"
             aria-selected={tab === value}
             onClick={() => setParams(value === 'all' ? {} : { tab: value })}
-            className={`rounded-md px-3 py-1.5 ${tab === value ? 'bg-stone-700 text-stone-50' : 'text-stone-400 hover:text-stone-100'}`}
+            className={`rounded-md px-3 py-1.5 pointer-coarse:py-2.5 ${tab === value ? 'bg-stone-700 text-stone-50' : 'text-stone-400 hover:text-stone-100'}`}
           >
             {label} {decks && <span className="text-stone-500">{decks.filter((d) => value === 'all' || d.status === value).length}</span>}
           </button>
@@ -102,7 +104,16 @@ function NewDeckForm({ onDone }: { onDone: () => void }) {
     >
       <label className="flex min-w-56 flex-1 flex-col gap-1 text-sm text-stone-400">
         Name
-        <input autoFocus required maxLength={100} value={name} onChange={(e) => setName(e.target.value)} className={input} />
+        <input
+          autoFocus
+          required
+          maxLength={100}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          autoCapitalize="words"
+          enterKeyHint="done"
+          className={input}
+        />
       </label>
       <label className="flex flex-col gap-1 text-sm text-stone-400">
         Format
@@ -124,11 +135,15 @@ function NewDeckForm({ onDone }: { onDone: () => void }) {
       <button
         type="submit"
         disabled={name.trim() === '' || create.isPending}
-        className="rounded-md bg-amber-500 px-3 py-1.5 text-sm font-medium text-stone-950 hover:bg-amber-400 disabled:opacity-50"
+        className="rounded-md bg-amber-500 px-3 py-1.5 text-sm font-medium text-stone-950 hover:bg-amber-400 disabled:opacity-50 pointer-coarse:py-2.5"
       >
         Create
       </button>
-      <button type="button" onClick={onDone} className="rounded-md border border-stone-700 px-3 py-1.5 text-sm text-stone-300 hover:bg-stone-800">
+      <button
+        type="button"
+        onClick={onDone}
+        className="rounded-md border border-stone-700 px-3 py-1.5 text-sm text-stone-300 hover:bg-stone-800 pointer-coarse:py-2.5"
+      >
         Cancel
       </button>
     </form>
@@ -142,11 +157,12 @@ function DeckCard({ deck }: { deck: DeckSummary }) {
   const remove = useDeckChange(() => apiSend<void>('DELETE', `/api/decks/${deck.id}`), "Couldn't delete the deck")
   const percent = completionPercent(deck.completion)
   return (
-    <li className="flex flex-col gap-3 rounded-xl border border-stone-800 bg-stone-900/40 p-4">
+    // The whole card opens the deck (the name's link stretched over it); its buttons sit above that.
+    <li className="relative flex flex-col gap-3 rounded-xl border border-stone-800 bg-stone-900/40 p-4">
       <div className="flex items-start justify-between gap-2">
         <Link
           to={`/decks/${deck.id}`}
-          className="min-w-0 font-serif text-lg font-semibold [overflow-wrap:anywhere] text-stone-50 hover:text-amber-300"
+          className="min-w-0 font-serif text-lg font-semibold [overflow-wrap:anywhere] text-stone-50 after:absolute after:inset-0 after:rounded-xl hover:text-amber-300"
         >
           {deck.name}
         </Link>
@@ -174,7 +190,7 @@ function DeckCard({ deck }: { deck: DeckSummary }) {
         </div>
       )}
       {confirmingDelete ? (
-        <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-rose-200">
+        <div role="alert" className="relative flex flex-wrap items-center gap-2 text-sm text-rose-200">
           Delete {deck.name}? This can't be undone.
           <button
             aria-label={`Delete ${deck.name}`}
@@ -183,16 +199,16 @@ function DeckCard({ deck }: { deck: DeckSummary }) {
               remove.mutate(undefined, { onSuccess: () => toast.success(`Deleted ${deck.name}.`) })
             }}
             disabled={remove.isPending || remove.isSuccess}
-            className="rounded-md bg-rose-700 px-2 py-1 text-rose-50 hover:bg-rose-600 disabled:opacity-50"
+            className={`${small} bg-rose-700 text-rose-50 hover:bg-rose-600 disabled:opacity-50`}
           >
             Delete
           </button>
-          <button onClick={() => setConfirmingDelete(false)} className="rounded-md border border-stone-700 px-2 py-1 text-stone-300 hover:bg-stone-800">
+          <button onClick={() => setConfirmingDelete(false)} className={`${small} border border-stone-700 text-stone-300 hover:bg-stone-800`}>
             Cancel
           </button>
         </div>
       ) : (
-        <div className="flex gap-2 text-sm">
+        <div className="relative flex gap-2 self-start text-sm">
           <button
             aria-label={`Duplicate ${deck.name}`}
             onClick={(e) => {
@@ -202,14 +218,14 @@ function DeckCard({ deck }: { deck: DeckSummary }) {
               duplicate.mutate(undefined, { onSuccess: (copy) => toast.success(`Created ${copy.name}.`) })
             }}
             disabled={duplicate.isPending}
-            className="rounded-md border border-stone-700 px-2 py-1 text-stone-300 hover:bg-stone-800 disabled:opacity-50"
+            className={`${small} border border-stone-700 text-stone-300 hover:bg-stone-800 disabled:opacity-50`}
           >
             Duplicate
           </button>
           <button
             aria-label={`Delete ${deck.name}`}
             onClick={() => setConfirmingDelete(true)}
-            className="rounded-md border border-stone-700 px-2 py-1 text-stone-300 hover:bg-stone-800"
+            className={`${small} border border-stone-700 text-stone-300 hover:bg-stone-800`}
           >
             Delete
           </button>

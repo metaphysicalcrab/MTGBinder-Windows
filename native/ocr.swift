@@ -48,10 +48,19 @@ func send<T: Encodable>(_ value: T) -> Bool {
   return true
 }
 
+/// How the image is decoded: upright, with its EXIF orientation applied (a phone can store a photo sideways), and at
+/// most 4096 px on its long side, so a huge photo doesn't take Vision past the timeout. A smaller one is left as it is.
+let decoding = [
+  kCGImageSourceCreateThumbnailFromImageAlways: true,
+  kCGImageSourceCreateThumbnailWithTransform: true,
+  kCGImageSourceThumbnailMaxPixelSize: 4096,
+  kCGImageSourceShouldCacheImmediately: true,
+] as CFDictionary
+
 func recognize(_ request: Request) -> Result? {
   let url = URL(fileURLWithPath: request.path)
   guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-    let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+    let image = CGImageSourceCreateThumbnailAtIndex(source, 0, decoding)
   else {
     send(Failure(id: request.id, error: "Can't read an image at \(request.path)"))
     return nil

@@ -10,7 +10,8 @@ import { ManaText } from '../ManaText.tsx'
 
 const STATUS_ICON: Record<LineStatus, string> = { owned: '✅', in_other_deck: '⚠️', buy: '🛒' }
 
-const stepButton = 'size-6 rounded border border-stone-700 text-stone-300 hover:bg-stone-800 disabled:opacity-50'
+const stepButton =
+  'size-6 rounded border border-stone-700 text-stone-300 hover:bg-stone-800 disabled:opacity-50 pointer-coarse:size-10 pointer-coarse:text-lg'
 
 /** The most copies a line can hold (the line PATCH caps quantities at 999). */
 const MAX_QUANTITY = 999
@@ -26,7 +27,8 @@ interface LinePatch {
 export function DeckLines({ deck }: { deck: DeckDetail }) {
   const [groupBy, setGroupBy] = useState<'type' | 'category'>('type')
   const sections = groupLines(deck.lines, groupBy)
-  const toggle = (active: boolean) => `rounded-md px-2.5 py-1 text-xs ${active ? 'bg-stone-700 text-stone-50' : 'text-stone-400 hover:text-stone-100'}`
+  const toggle = (active: boolean) =>
+    `rounded-md px-2.5 py-1 text-xs pointer-coarse:px-3 pointer-coarse:py-2 pointer-coarse:text-sm ${active ? 'bg-stone-700 text-stone-50' : 'text-stone-400 hover:text-stone-100'}`
   return (
     <section aria-label="Deck list" className="min-w-0 space-y-4">
       <div className="flex items-center justify-between">
@@ -42,8 +44,9 @@ export function DeckLines({ deck }: { deck: DeckDetail }) {
       </div>
       {sections.length === 0 ? (
         <p className="py-10 text-center text-stone-500">
-          No cards yet. Search on the left, paste a list under Import / Export, or scan the cards you have with Scan cards
-          into this deck.
+          No cards yet. Search <span className="lg:hidden">under Add cards</span>
+          <span className="hidden lg:inline">on the left</span>, paste a list under Import / Export, or scan the cards you
+          have with Scan cards into this deck.
         </p>
       ) : (
         sections.map((section) => (
@@ -87,8 +90,12 @@ function LineRow({ deckId, line }: { deckId: number; line: DeckLine }) {
   const settling = update.isPending || remove.isPending
   return (
     <li className="py-1.5">
-      <div className="flex items-center gap-2 text-sm">
-        <span className="flex shrink-0 items-center gap-1">
+      {/*
+        Below sm (a phone), two lines: the name and its cost, then the stepper, status, price and menu (each order-2),
+        so the name has the row's width. From sm up, one line, in the order written here.
+      */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm sm:flex-nowrap">
+        <span className="order-2 flex shrink-0 items-center gap-1 sm:order-none pointer-coarse:gap-3">
           <button aria-label={`One fewer ${line.name}`} onClick={() => step(-1)} disabled={missing || settling} className={stepButton}>
             −
           </button>
@@ -106,7 +113,10 @@ function LineRow({ deckId, line }: { deckId: number; line: DeckLine }) {
           {missing ? (
             <span className="max-w-full truncate text-stone-400 italic">{line.name}</span>
           ) : (
-            <button onClick={() => drawer.open(line.cardId)} className="max-w-full truncate text-left text-stone-100 hover:text-amber-300">
+            <button
+              onClick={() => drawer.open(line.cardId)}
+              className="max-w-full truncate text-left text-stone-100 hover:text-amber-300 pointer-coarse:py-1.5"
+            >
               {line.name}
             </button>
           )}
@@ -120,20 +130,25 @@ function LineRow({ deckId, line }: { deckId: number; line: DeckLine }) {
           )}
         </span>
         <ManaText text={line.manaCost} className="shrink-0 text-xs" />
-        <span role="img" aria-label={label} title={label} className="w-5 shrink-0 text-center">
+        <span aria-hidden className="order-1 basis-full sm:hidden" />
+        <span role="img" aria-label={label} title={label} className="order-2 w-5 shrink-0 text-center sm:order-none">
           {STATUS_ICON[line.status]}
         </span>
-        <span className="w-16 shrink-0 text-right text-stone-300 tabular-nums">{formatUsd(line.priceUsd)}</span>
+        <span className="order-2 ml-auto w-16 shrink-0 text-right text-stone-300 tabular-nums sm:order-none sm:ml-0">
+          {formatUsd(line.priceUsd)}
+        </span>
         <button
           aria-label={`Edit ${line.name}`}
           aria-expanded={editing}
           onClick={() => setEditing((e) => !e)}
-          className="shrink-0 rounded px-1.5 text-stone-400 hover:bg-stone-800 hover:text-stone-100"
+          className="order-2 shrink-0 rounded px-1.5 text-stone-400 hover:bg-stone-800 hover:text-stone-100 sm:order-none pointer-coarse:min-h-10 pointer-coarse:min-w-10"
         >
           ⋯
         </button>
       </div>
-      <div className="pl-[4.75rem] text-xs text-stone-500">
+      <div className="text-xs text-stone-500 sm:pl-[4.75rem] sm:pointer-coarse:pl-[8.5rem]">
+        {/* What the status icon means, which a finger has no tooltip to tell. */}
+        <span className="hidden text-stone-300 pointer-coarse:inline">{label} · </span>
         own {line.owned}, {line.inOtherBuiltDecks} in other built decks
         {line.scanned > 0 && (
           <span className="ml-2 text-stone-400">
@@ -179,16 +194,17 @@ function LineEditor({ line, onChange, changing, onRemove, removing }: LineEditor
     queryFn: ({ signal }) => apiGet<CardDetail>(`/api/cards/${encodeURIComponent(line.cardId)}`, signal),
     enabled: !missing,
   })
-  const field = 'rounded-md border border-stone-700 bg-stone-900 px-2 py-1 text-xs text-stone-100'
+  const field = 'rounded-md border border-stone-700 bg-stone-900 px-2 py-1 text-xs text-stone-100 pointer-coarse:py-2 pointer-coarse:text-sm'
+  const button = 'rounded-md border px-2 py-1 pointer-coarse:px-3 pointer-coarse:py-2'
   return (
-    <div className="mt-2 ml-[4.75rem] flex flex-wrap items-center gap-2 rounded-lg border border-stone-800 bg-stone-900/60 p-2 text-xs text-stone-400">
+    <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-stone-800 bg-stone-900/60 p-2 text-xs text-stone-400 sm:ml-[4.75rem] pointer-coarse:text-sm sm:pointer-coarse:ml-[8.5rem]">
       <span>Move to</span>
       {BOARD_ORDER.filter((b) => b !== line.board).map((b) => (
         <button
           key={b}
           onClick={() => onChange({ board: b })}
           disabled={changing}
-          className="rounded-md border border-stone-700 px-2 py-1 text-stone-200 hover:bg-stone-800 disabled:opacity-50"
+          className={`${button} border-stone-700 text-stone-200 hover:bg-stone-800 disabled:opacity-50`}
         >
           {BOARD_LABEL[b]}
         </button>
@@ -200,8 +216,16 @@ function LineEditor({ line, onChange, changing, onRemove, removing }: LineEditor
         }}
         className="flex items-center gap-1"
       >
-        <input aria-label="Category" placeholder="Category" maxLength={60} value={category} onChange={(e) => setCategory(e.target.value)} className={`${field} w-32`} />
-        <button type="submit" className="rounded-md border border-stone-700 px-2 py-1 text-stone-200 hover:bg-stone-800">
+        <input
+          aria-label="Category"
+          placeholder="Category"
+          maxLength={60}
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          enterKeyHint="done"
+          className={`${field} w-32`}
+        />
+        <button type="submit" className={`${button} border-stone-700 text-stone-200 hover:bg-stone-800`}>
           Set
         </button>
       </form>
@@ -229,7 +253,7 @@ function LineEditor({ line, onChange, changing, onRemove, removing }: LineEditor
       <button
         onClick={onRemove}
         disabled={removing}
-        className="ml-auto rounded-md border border-rose-900 px-2 py-1 text-rose-300 hover:bg-rose-950 disabled:opacity-50"
+        className={`${button} ml-auto border-rose-900 text-rose-300 hover:bg-rose-950 disabled:opacity-50`}
       >
         Remove
       </button>

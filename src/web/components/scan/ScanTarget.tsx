@@ -7,7 +7,7 @@ import { apiSend } from '../../lib/api.ts'
 import { BOARD_LABEL, useDeckChange, useDecks } from '../../lib/decks.ts'
 import { boardOnDeck, hasCommanderBoard } from '../../lib/scan.ts'
 
-const control = 'rounded-md border border-stone-700 bg-stone-900 px-2 py-1 text-sm text-stone-100 disabled:opacity-50'
+const control = 'rounded-md border border-stone-700 bg-stone-900 px-2 py-1 text-sm text-stone-100 disabled:opacity-50 pointer-coarse:py-2'
 
 /**
  * Chooses where scans go: the collection only, or a deck and one of its boards. Commander is offered for decks whose
@@ -115,6 +115,9 @@ function NewDeckForm({ onCreated, onCancel }: { onCreated: (deck: DeckSummary) =
         autoFocus
         required
         maxLength={100}
+        autoCapitalize="words"
+        autoComplete="off"
+        enterKeyHint="done"
         value={name}
         onChange={(e) => setName(e.target.value)}
         className={`min-w-48 flex-1 ${control}`}
@@ -129,11 +132,15 @@ function NewDeckForm({ onCreated, onCancel }: { onCreated: (deck: DeckSummary) =
       <button
         type="submit"
         disabled={name.trim() === '' || create.isPending}
-        className="rounded-md bg-amber-500 px-3 py-1 text-sm font-medium text-stone-950 hover:bg-amber-400 disabled:opacity-50"
+        className="rounded-md bg-amber-500 px-3 py-1 text-sm font-medium text-stone-950 hover:bg-amber-400 disabled:opacity-50 pointer-coarse:py-2.5"
       >
         Create built deck
       </button>
-      <button type="button" onClick={onCancel} className="rounded-md border border-stone-700 px-3 py-1 text-sm text-stone-300 hover:bg-stone-800">
+      <button
+        type="button"
+        onClick={onCancel}
+        className="rounded-md border border-stone-700 px-3 py-1 text-sm text-stone-300 hover:bg-stone-800 pointer-coarse:py-2.5"
+      >
         Cancel
       </button>
     </form>
@@ -151,7 +158,7 @@ export function ScanTargetBar({ target, onChange }: { target: ScanTarget | null;
       <span className="text-stone-400">Scanning into</span>
       <TargetPicker label="Scanning into" target={target} onChange={onChange} onNewDeck={() => setCreating(true)} />
       {target && (
-        <Link to={`/decks/${target.deckId}`} className="text-amber-300 hover:underline">
+        <Link to={`/decks/${target.deckId}`} className="text-amber-300 hover:underline pointer-coarse:py-2">
           Open deck
         </Link>
       )}

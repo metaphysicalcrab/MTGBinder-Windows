@@ -6,7 +6,10 @@ export function ThreadList() {
   const { data: threads, error } = useThreads()
   return (
     <nav aria-label="Conversations" className="space-y-3">
-      <Link to="/brainstorm" className="block rounded-md border border-stone-700 px-3 py-1.5 text-center text-sm text-stone-200 hover:bg-stone-800">
+      <Link
+        to="/brainstorm"
+        className="block rounded-md border border-stone-700 px-3 py-1.5 text-center text-sm text-stone-200 hover:bg-stone-800 pointer-coarse:py-2.5"
+      >
         New conversation
       </Link>
       {error && <p className="text-sm text-rose-300">Couldn't load conversations: {error.message}</p>}
@@ -16,7 +19,7 @@ export function ThreadList() {
             <NavLink
               to={`/brainstorm/${t.id}`}
               className={({ isActive }) =>
-                `block rounded-md px-3 py-1.5 text-sm ${isActive ? 'bg-stone-800 text-stone-50' : 'text-stone-400 hover:bg-stone-900 hover:text-stone-100'}`
+                `block rounded-md px-3 py-1.5 text-sm pointer-coarse:py-2.5 ${isActive ? 'bg-stone-800 text-stone-50' : 'text-stone-400 hover:bg-stone-900 hover:text-stone-100'}`
               }
             >
               <span className="block truncate">{t.title || 'New conversation'}</span>

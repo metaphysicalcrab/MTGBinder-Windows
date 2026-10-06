@@ -46,8 +46,8 @@ export function usePlaytestGame() {
 
 /** What a refused save tells the owner, as the page reloads the saved game. */
 export function refusedMessage(err: ApiRequestError): string {
-  if (err.status === 404) return 'This game was ended in another window.'
-  if (err.status === 409) return 'This game changed in another window, so Binder reloaded the saved game.'
+  if (err.status === 404) return 'This game was ended in another window or on another device.'
+  if (err.status === 409) return 'This game changed in another window or on another device, so Binder reloaded the saved game.'
   return `Binder couldn't save that move (${err.message}), so it reloaded the saved game.`
 }
 

@@ -1,18 +1,14 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
-import { describe, expect, it, onTestFinished } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { insertCardRows, rebuildCardNames } from '../../src/server/cards/repo.ts'
 import { openDb } from '../../src/server/db/index.ts'
-import { librarySummary, moveLibrary, MoveError } from '../../scripts/lib/move.ts'
+import { desktopWords, librarySummary, moveLibrary, MoveError, strayLibraryNote } from '../../scripts/lib/move.ts'
 import { fixtureRows } from '../helpers/db.ts'
 import { deck, own } from '../helpers/library.ts'
+import { tempDir } from '../helpers/tmp.ts'
 
-function scratch(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'binder-move-'))
-  onTestFinished(() => fs.rmSync(dir, { recursive: true, force: true }))
-  return dir
-}
+const scratch = () => tempDir('binder-move-')
 
 /** A library in `dir` with card data, 7 copies of 2 cards, and a deck, plus the files a library keeps beside it. */
 function library(dir: string) {
@@ -70,10 +66,16 @@ describe('moveLibrary (spec §3.4)', () => {
     expect(await moveLibrary(from, to)).toMatchObject({ copies: 7, decks: 1 })
     expect(fs.existsSync(path.join(to, 'backups', 'binder-2026-09-28.db'))).toBe(false)
     // Now it holds a collection: a second move refuses, and changes nothing.
-    await expect(moveLibrary(from, to)).rejects.toThrow(
+    await expect(moveLibrary(from, to, { platform: 'darwin' })).rejects.toThrow(
       new MoveError(
         `${to} already has a library (7 copies of 2 cards, 1 deck): nothing was copied. Binder.app's library is kept; ` +
           'to use this one instead, quit Binder, move that folder aside, and run pnpm move-library again.',
+      ),
+    )
+    await expect(moveLibrary(from, to, { platform: 'win32' })).rejects.toThrow(
+      new MoveError(
+        `${to} already has a library (7 copies of 2 cards, 1 deck): nothing was copied. The Binder app's library is ` +
+          'kept; to use this one instead, quit Binder, move that folder aside, and run pnpm move-library again.',
       ),
     )
   })
@@ -97,22 +99,80 @@ describe('moveLibrary (spec §3.4)', () => {
     insertCardRows(fresh, 'cards', fixtureRows())
     fresh.close()
     fs.writeFileSync(path.join(to, 'backups', 'binder-2026-09-28.db'), 'empty library backup')
-    // A scan that can't be read makes the folder copy fail after the database is copied, as a full disk or Ctrl+C would.
-    const scan = path.join(from, 'scans', '1.jpg')
-    fs.chmodSync(scan, 0o000)
-    let failure: unknown
-    try {
-      failure = await moveLibrary(from, to).catch((err: unknown) => err)
-    } finally {
-      fs.chmodSync(scan, 0o644)
-    }
+    // The folders' copy fails after the database is copied, as a full disk or Ctrl+C would. (Not by taking a file's
+    // permissions away: root, and Windows, read it anyway.)
+    const copy = vi.spyOn(fs, 'cpSync').mockImplementationOnce(() => {
+      throw new Error("ENOSPC: no space left on device, copyfile 'scans/1.jpg'")
+    })
+    onTestFinished(() => copy.mockRestore())
+    const failure = await moveLibrary(from, to).catch((err: unknown) => err)
+    expect(copy).toHaveBeenCalledOnce()
     expect(failure).toBeInstanceOf(MoveError)
     expect((failure as MoveError).message).toMatch(/^Couldn't copy the library \(.+\): nothing was changed\.$/)
     expect(librarySummary(path.join(to, 'binder.db'))).toMatchObject({ copies: 0 })
     expect(fs.existsSync(path.join(to, 'backups', 'binder-2026-09-28.db'))).toBe(true)
     expect(fs.existsSync(path.join(to, '.moving'))).toBe(false)
-    // Once the scan can be read, the move goes through.
+    // Once the copy can be made, the move goes through.
     expect(await moveLibrary(from, to)).toEqual({ copies: 7, cards: 2, decks: 1, scans: 0, conversations: 0 })
+  })
+
+  it('says to run it again when the copy can\'t be put in place, and a rerun then finishes it', async () => {
+    const dir = scratch()
+    const from = path.join(dir, 'data')
+    const to = path.join(dir, 'Binder')
+    fs.mkdirSync(from)
+    library(from).close()
+    // The database's rename fails, the last step (as one held open past fs-retry's tries on Windows would). EIO, which
+    // no platform tries again, so the test is the same everywhere.
+    const realRename = fs.renameSync
+    const rename = vi.spyOn(fs, 'renameSync').mockImplementation((source, dest) => {
+      if (String(dest).endsWith('binder.db')) throw Object.assign(new Error(`EIO: i/o error, rename '${String(source)}'`), { code: 'EIO' })
+      realRename(source, dest)
+    })
+    onTestFinished(() => rename.mockRestore())
+    const failure = await moveLibrary(from, to).catch((err: unknown) => err)
+    expect(failure).toBeInstanceOf(MoveError)
+    expect((failure as MoveError).message).toMatch(/^Couldn't put the copy in place \(EIO: .+\): run pnpm move-library again\.$/)
+    // No library yet (the database goes in last), so the rerun starts again.
+    expect(fs.existsSync(path.join(to, 'binder.db'))).toBe(false)
+    rename.mockRestore()
+    expect(await moveLibrary(from, to)).toEqual({ copies: 7, cards: 2, decks: 1, scans: 0, conversations: 0 })
+    expect(fs.readdirSync(to).sort()).toEqual(['backups', 'binder.db', 'bulk', 'scans'])
+  })
+
+  it('says why in one line when its staging folder is held open, and a rerun clears it once let go', async () => {
+    const dir = scratch()
+    const from = path.join(dir, 'data')
+    const to = path.join(dir, 'Binder')
+    fs.mkdirSync(from)
+    library(from).close()
+    // Antivirus scanning the files just copied, past fs-retry's tries on Windows (elsewhere there's one): the staging
+    // folder, once there, can't be removed. EBUSY, as Windows says it.
+    const realRm = fs.rmSync
+    const rm = vi.spyOn(fs, 'rmSync').mockImplementation((file, options) => {
+      if (path.basename(String(file)) === '.moving' && fs.existsSync(file)) {
+        throw Object.assign(new Error(`EBUSY: resource busy or locked, rmdir '${String(file)}'`), { code: 'EBUSY' })
+      }
+      realRm(file, options)
+    })
+    onTestFinished(() => rm.mockRestore())
+    const copy = vi.spyOn(fs, 'cpSync').mockImplementationOnce(() => {
+      throw new Error("ENOSPC: no space left on device, copyfile 'scans/1.jpg'")
+    })
+    onTestFinished(() => copy.mockRestore())
+    // The copy's failure is the one reported, though its staging folder couldn't be cleared.
+    const failure = await moveLibrary(from, to).catch((err: unknown) => err)
+    expect(failure).toBeInstanceOf(MoveError)
+    expect((failure as MoveError).message).toMatch(/^Couldn't copy the library \(ENOSPC: .+\): nothing was changed\.$/)
+    expect(fs.existsSync(path.join(to, '.moving'))).toBe(true)
+    // A rerun that can't clear it says so in a line too, changing nothing.
+    const again = await moveLibrary(from, to).catch((err: unknown) => err)
+    expect(again).toBeInstanceOf(MoveError)
+    expect((again as MoveError).message).toMatch(/^Couldn't copy the library \(EBUSY: .+\): nothing was changed\.$/)
+    expect(fs.existsSync(path.join(to, 'binder.db'))).toBe(false)
+    rm.mockRestore()
+    expect(await moveLibrary(from, to)).toEqual({ copies: 7, cards: 2, decks: 1, scans: 0, conversations: 0 })
+    expect(fs.readdirSync(to).sort()).toEqual(['backups', 'binder.db', 'bulk', 'scans'])
   })
 
   it('clears what a killed move left behind', async () => {
@@ -126,5 +186,28 @@ describe('moveLibrary (spec §3.4)', () => {
     expect(await moveLibrary(from, to)).toMatchObject({ copies: 7, decks: 1 })
     expect(fs.existsSync(path.join(to, '.moving'))).toBe(false)
     expect(fs.readdirSync(to).sort()).toEqual(['backups', 'binder.db', 'bulk', 'scans'])
+  })
+})
+
+describe('pnpm move-library on each platform', () => {
+  it('names the desktop app, how to quit it, and where to open it, as each platform does', () => {
+    expect(desktopWords('darwin')).toEqual({ app: 'Binder.app', quit: 'Cmd+Q in Binder.app', open: 'Open Binder.app' })
+    expect(desktopWords('win32')).toEqual({
+      app: 'the Binder app',
+      quit: 'right-click its icon in the notification area → Quit Binder',
+      open: 'Open Binder from the Start menu',
+    })
+  })
+
+  it('says, on Windows, when an earlier move copied the library to the Mac\'s folder, which nothing there opens', () => {
+    const home = String.raw`C:\Users\me`
+    const stray = String.raw`C:\Users\me\Library\Application Support\Binder`
+    const at = (file: string) => (candidate: fs.PathLike) => String(candidate) === file
+    expect(strayLibraryNote('win32', home, at(`${stray}\\binder.db`))).toBe(
+      `An earlier pnpm move-library copied your library to ${stray}, which Binder on Windows doesn't use: delete that folder once you've checked Binder.`,
+    )
+    expect(strayLibraryNote('win32', home, () => false)).toBeNull()
+    // On a Mac that's the library's own folder.
+    expect(strayLibraryNote('darwin', '/Users/me', () => true)).toBeNull()
   })
 })

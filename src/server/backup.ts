@@ -3,6 +3,7 @@ import path from 'node:path'
 import type { BackupStatus } from '../shared/types.ts'
 import type { DB } from './db/index.ts'
 import { getMeta, setMeta } from './db/meta.ts'
+import { removeWithRetry, renameWithRetry } from './fs-retry.ts'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 /** Daily backups kept (spec §6): a week of them. */
@@ -97,16 +98,22 @@ const byDateThenCopy =
 
 /**
  * Writes a compact copy of the database (VACUUM INTO, about half the live file's size) to `file`, under a temporary
- * name first so an interrupted copy never passes for a backup. A failed copy leaves no temporary file behind.
+ * name first so an interrupted copy never passes for a backup. A failed copy leaves no temporary file behind (or, when
+ * even that can't be removed, the next backup's cleanup does). On Windows, renaming the copy waits out antivirus
+ * scanning the file just written (see fs-retry).
  */
 function copyDatabase(db: DB, file: string): void {
   const temp = `${file}.tmp`
-  fs.rmSync(temp, { force: true }) // left by an interrupted backup; VACUUM INTO refuses to overwrite
+  removeWithRetry(temp) // left by an interrupted backup; VACUUM INTO refuses to overwrite
   try {
     db.prepare('VACUUM INTO ?').run(temp)
-    fs.renameSync(temp, file)
+    renameWithRetry(temp, file)
   } catch (err) {
-    fs.rmSync(temp, { force: true }) // a partial copy can be hundreds of MB
+    try {
+      removeWithRetry(temp) // a partial copy can be hundreds of MB
+    } catch {
+      // removePartialCopies takes it at the next backup; the copy's own failure is the one to report.
+    }
     throw err
   }
 }
@@ -123,8 +130,9 @@ export interface DailyBackup {
  * newest 7 by date, always counting the one just saved). Back up now's extra copies and the copies saved before an
  * upgrade are kept apart, and this pruning doesn't count them. It first removes partial copies interrupted backups left.
  * An existing backup for today is never replaced: after a restore it may hold newer data than the database.
- * Restore by stopping Binder and copying a backup over the library folder's binder.db (the project's data/, or
- * Binder.app's ~/Library/Application Support/Binder), deleting binder.db-wal and -shm.
+ * Restore by stopping Binder and copying a backup over the library folder's binder.db (the project's data/, or the
+ * desktop app's: ~/Library/Application Support/Binder on the Mac, %LOCALAPPDATA%\Binder on Windows), deleting
+ * binder.db-wal and -shm.
  * Returns the backup it saved or found for today, or null when none was due.
  */
 export function backupIfDue(db: DB, dir: string, now = new Date()): DailyBackup | null {

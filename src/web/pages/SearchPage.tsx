@@ -5,6 +5,7 @@ import type { SearchPage as ResultPage } from '../../shared/types.ts'
 import { SearchBar } from '../components/search/SearchBar.tsx'
 import { SearchResults } from '../components/search/SearchResults.tsx'
 import { ApiRequestError, apiGet } from '../lib/api.ts'
+import { onOverlayEntry } from '../lib/back-to-close.ts'
 import {
   canSearch,
   libraryOnlyTerms,
@@ -43,8 +44,12 @@ export function SearchView({ locked }: { locked?: SearchScope }) {
     retry: (count, err) => !(err instanceof ApiRequestError) && count < 1,
   })
 
-  /** Changes the search; any change except paging (or an explicit page) goes back to page 1. */
-  const update = (patch: Partial<SearchState>) => setParams(writeSearchState({ ...state, page: 1, ...patch }, locked))
+  /**
+   * Changes the search; any change except paging (or an explicit page) goes back to page 1. Made with Library's import
+   * panel open, it replaces the panel's history entry (see useOnOverlayEntry), and the panel adds another.
+   */
+  const update = (patch: Partial<SearchState>) =>
+    setParams(writeSearchState({ ...state, page: 1, ...patch }, locked), { replace: onOverlayEntry() })
   const apiError = error instanceof ApiRequestError ? error : null
   const queryError = apiError?.code === 'bad_query' || apiError?.code === 'empty_query' ? apiError : null
   const offline = apiError?.code === 'scryfall_offline'

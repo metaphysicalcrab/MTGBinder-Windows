@@ -1,6 +1,7 @@
 import { clampPos } from '../../shared/playtest/placement.ts'
 import type { CardData, CardKind, CardState, Dest, Pos, SeatIndex } from '../../shared/playtest/types.ts'
 import type { FormatId } from '../../shared/types.ts'
+import { IS_MAC, isUndoKey } from './platform.ts'
 
 /** The playtest board's arithmetic (spec §5.9.3, §5.9.4), kept apart from React so it can be tested. */
 
@@ -149,14 +150,119 @@ export function counterTag(name: string, value: number): string {
   return `${name} ${value}`
 }
 
+/** Where a drag started, which decides what a click without a drag does. */
+export type DragSource = 'battlefield' | 'hand' | 'command' | 'stack' | 'pile'
+
+/**
+ * How long a finger (or a pen) held still on the table opens what a right-click would (M13): about as long as Android's
+ * own long-press.
+ */
+export const LONG_PRESS_MS = 450
+
+/** A finger or a pen, not a mouse: it drags after a longer move, holds for a menu, and taps to play a card. */
+export function isTouch(pointerType: string): boolean {
+  return pointerType === 'touch' || pointerType === 'pen'
+}
+
+/**
+ * How far a press moves before it's a drag rather than a click: 5 px with a mouse, 10 with a finger or a pen, which
+ * wobble as they come down and lift.
+ */
+export function dragStartPx(touch: boolean): number {
+  return touch ? 10 : 5
+}
+
+/** A press on the table, from the pointer going down until it comes up (or the browser takes it: pointercancel). */
+export interface Press {
+  start: { x: number; y: number }
+  touch: boolean
+  /** It has gone far enough to be a drag (dragStartPx); once a drag, it stays one. */
+  moved: boolean
+}
+
+/** Whether a press is a drag with the pointer at `at`. */
+export function movedFar(press: Press, at: { x: number; y: number }): boolean {
+  return press.moved || Math.hypot(at.x - press.start.x, at.y - press.start.y) > dragStartPx(press.touch)
+}
+
+/** Whether a press held for LONG_PRESS_MS opens its menu: a finger or a pen that hasn't moved. A mouse right-clicks. */
+export function holdOpensMenu(press: Press): boolean {
+  return press.touch && !press.moved
+}
+
+/**
+ * How soon after a finger's tap plays a card the next press is that tap's second half: a double-tap (a mouse's habit, or
+ * a pen's double-click) plays one card, not the one that moved under it as well. Windows' double-click time; Android's
+ * double-tap is 300 ms.
+ */
+export const DOUBLE_TAP_MS = 500
+
+/**
+ * What a press on a card that comes up without moving does (spec §5.9.4, M13). On the battlefield: attaches the cards
+ * waiting for a host, adds the card to the selection or takes it out (Shift, or Select's mode for a finger), or taps it.
+ * In hand or the command zone a finger plays the card, unless it's a double-tap's second half (`sincePlay`, the time
+ * since a tap last played one, under DOUBLE_TAP_MS); on the stack or in a pile it opens the card's menu, Resolve first
+ * on the stack. A mouse plays and resolves with a double-click.
+ */
+export function tapAction(
+  source: DragSource,
+  press: { touch: boolean; shift: boolean; sincePlay: number },
+  board: { attaching: boolean; selecting: boolean },
+): 'attach' | 'select' | 'tap' | 'play' | 'menu' | 'none' {
+  if (source === 'battlefield') return board.attaching ? 'attach' : press.shift || board.selecting ? 'select' : 'tap'
+  if (!press.touch) return 'none'
+  if (source === 'hand' || source === 'command') return press.sincePlay < DOUBLE_TAP_MS ? 'none' : 'play'
+  return 'menu'
+}
+
+/** The narrowest window the table fits (M13): a tablet's. Narrower, with a finger, the page says so first. */
+export const TABLE_MIN_WIDTH = 768
+
+/**
+ * The shortest screen the table fits (M13): a tablet's on its side, 600 px or more. A phone's on its side is 360–430,
+ * and Chrome's address bar and Binder's header and tabs leave the battlefield a strip too thin to drop a card on, so
+ * the page says so first, whichever way up the phone is. The screen's height, not the window's: the keyboard (a life
+ * total typed on a tablet) shortens the window, and mustn't swap the table for the notice.
+ */
+export const TABLE_MIN_SCREEN_HEIGHT = 500
+
+/** Where a finger's table doesn't fit (M13): a window narrower than a tablet's, or a phone's screen either way up. */
+export const SMALL_SCREEN_QUERY = `(width < ${TABLE_MIN_WIDTH}px), (device-height < ${TABLE_MIN_SCREEN_HEIGHT}px)`
+
+/**
+ * A tablet's screen (M13): 600 px or more both ways, as Android tells a tablet from a phone, whose screen is 360–430
+ * px across. Held upright, its window can be narrower than the table (a Galaxy Tab S4's is 712 px), but on its side
+ * it's wide enough.
+ */
+export const TABLET_SCREEN_QUERY = '(device-width >= 600px) and (device-height >= 600px)'
+
+/** A screen held upright: taller than it's wide, whatever the window's shape (an app beside Binder narrows the window). */
+export const UPRIGHT_SCREEN_QUERY = '(device-aspect-ratio < 1)'
+
+/**
+ * What the Playtest page says where a finger's table doesn't fit (SMALL_SCREEN_QUERY): on a tablet held upright, to
+ * turn it on its side; on a tablet on its side, whose window another app shares, to give Binder the whole screen; on a
+ * phone, that it needs a tablet or the PC.
+ */
+export function smallScreenText(screen: { tablet: boolean; upright: boolean }): string {
+  if (!screen.tablet) return 'Playtest needs a bigger screen: a tablet or the PC.'
+  return screen.upright
+    ? 'Playtest needs a wider screen: turn the tablet on its side.'
+    : 'Playtest needs a wider window: give Binder the whole screen.'
+}
+
 export type BoardKey = 'tap' | 'flip' | 'plus' | 'minus' | 'draw' | 'switch' | 'undo' | 'clear'
 
 /**
- * What a key does on the board (spec §5.9.4), or null. Cmd+Z undoes (the one with Cmd); the rest are bare keys, and
- * none follows a `g` (which starts going to another page).
+ * What a key does on the board (spec §5.9.4), or null. Undo is Cmd+Z on a Mac and Ctrl+Z elsewhere (isUndoKey, the one
+ * with a modifier); the rest are bare keys, and none follows a `g` (which starts going to another page).
  */
-export function boardKey(e: { key: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean }, afterG: boolean): BoardKey | null {
-  if (e.metaKey && !e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'z' && !e.shiftKey) return 'undo'
+export function boardKey(
+  e: { key: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean },
+  afterG: boolean,
+  mac = IS_MAC,
+): BoardKey | null {
+  if (isUndoKey(e, mac)) return 'undo'
   if (e.metaKey || e.ctrlKey || e.altKey || afterG) return null
   switch (e.key) {
     case 't':

@@ -3,9 +3,9 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { describeAiError, type AiClient } from './ai/client.ts'
 import { backupNow, backupStatus } from './backup.ts'
-import { compactLibrary, librarySize } from './compact.ts'
+import { CompactUnfinishedError, compactLibrary, librarySize } from './compact.ts'
 import type { DB } from './db/index.ts'
-import { ApiError, parseWith, readJson } from './http.ts'
+import { ApiError, parseWith, readJson, type AppEnv } from './http.ts'
 import { getSettings, updateSettings } from './settings.ts'
 
 /** Strict, so a mistyped setting is refused rather than answered 200 with nothing changed. */
@@ -43,17 +43,21 @@ const ApiKey = z
 const KeyBody = z.object({ apiKey: ApiKey.nullable() })
 const TestBody = z.object({ apiKey: ApiKey.optional() })
 
-export function settingsRoutes(deps: { db: DB; ai?: AiClient; backupDir?: string }): Hono {
-  const routes = new Hono()
+export function settingsRoutes(deps: { db: DB; ai?: AiClient; backupDir?: string }): Hono<AppEnv> {
+  const routes = new Hono<AppEnv>()
   routes.get('/', (c) => c.json(getSettings(deps.db)))
   routes.patch('/', async (c) => c.json(updateSettings(deps.db, parseWith(SettingsBody, await readJson(c.req)))))
 
-  // The Anthropic API key (spec §5.6): never sent back, only whether one is set and its last four characters.
+  // The Anthropic API key (spec §5.6): never sent back, only whether one is set and its last four characters (not
+  // to a phone, which can't change it: spec §5.10).
   const ai = () => {
     if (!deps.ai) throw new ApiError(404, 'not_found', 'No API key settings here')
     return deps.ai
   }
-  routes.get('/ai', (c) => c.json(ai().status()))
+  routes.get('/ai', (c) => {
+    const status = ai().status()
+    return c.json(c.get('client')?.kind === 'device' ? { ...status, hint: null } : status)
+  })
   routes.put('/ai', async (c) => c.json(ai().setKey(parseWith(KeyBody, await readJson(c.req)).apiKey)))
   routes.post('/ai/test', async (c) => {
     const client = ai() // no key settings here is a 404, whatever the body
@@ -93,13 +97,29 @@ export function settingsRoutes(deps: { db: DB; ai?: AiClient; backupDir?: string
       return c.json({ before, after, backup: path.basename(backup) })
     } catch (err) {
       if (err instanceof ApiError) throw err
-      const reason = (err instanceof Error ? err.message : String(err)).replace(/\.$/, '')
-      throw new ApiError(
-        500,
-        'compact_failed',
-        `Couldn't compact the library: ${reason}. Free up disk space and try again; the library is unchanged.`,
-      )
+      throw new ApiError(500, 'compact_failed', compactFailure(err))
     }
   })
   return routes
+}
+
+/**
+ * Why compacting failed, and what to do next, by its cause: a file in the library folder another program holds (on
+ * Windows: antivirus, OneDrive, or another Binder, mid-backup), or a full disk (VACUUM's working copy goes on the
+ * temporary files' drive, which may not be the library's). The library is said to be unchanged only when the
+ * failure came before VACUUM rewrote it, or from VACUUM itself, which leaves it as it was when it fails.
+ */
+export function compactFailure(err: unknown): string {
+  const unfinished = err instanceof CompactUnfinishedError
+  const cause = unfinished ? err.cause : err
+  const reason = (cause instanceof Error ? cause.message : String(cause)).replace(/\.$/, '')
+  const code = (cause as { code?: unknown } | null)?.code
+  const next =
+    code === 'EPERM' || code === 'EBUSY' || code === 'EACCES' || code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED'
+      ? 'A file in the library folder is in use by another program (antivirus, OneDrive, or another Binder); try again in a moment'
+      : code === 'SQLITE_FULL'
+        ? "Free up disk space, on the library's drive and on the one that holds temporary files, and try again"
+        : 'Free up disk space and try again'
+  if (unfinished) return `Couldn't finish compacting the library: ${reason}. It was compacted; compact it again to finish.`
+  return `Couldn't compact the library: ${reason}. ${next}; the library is unchanged.`
 }

@@ -1,19 +1,30 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   type AutoStatus,
   boxAverage,
+  BUILT_IN_CAMERA_RANK,
   cameraRank,
   cameraToUse,
   captureRect,
   createAutoCapture,
   guideRect,
-  MAC_CAMERA_RANK,
   SAMPLE_MS,
   SAMPLE_SCALE,
   SAMPLE_SIZE,
   spaceCaptures,
 } from '../../lib/capture.ts'
+import {
+  CAN_USE_LIVE_CAMERA,
+  detectPlatform,
+  inBinderApp,
+  IS_ANDROID,
+  PLATFORM,
+  type Platform,
+  useCoarsePointer,
+} from '../../lib/platform.ts'
 import { shortcutAllowed } from '../../lib/shortcuts.ts'
+import { CAPTURE_BUTTON, CaptureBar } from './CaptureBar.tsx'
+import { PhotoPanel, TakePhotoButton } from './PhotoCapture.tsx'
 
 const CAMERA_KEY = 'binder.scan.camera'
 const MODE_KEY = 'binder.scan.mode'
@@ -44,24 +55,66 @@ const store = (key: string, value: string) => {
 }
 
 /**
- * Whether the page runs in Binder.app, whose window names Electron in its user agent. It has no address bar, and once
- * macOS has recorded a refused camera it doesn't ask again: only System Settings turns the camera back on.
+ * Why the camera didn't start, and what to do about it where the page runs (`navigator.userAgent`, and the platform it
+ * names): System Settings in the Mac's app (which has no address bar, and once macOS has recorded a refused camera it
+ * doesn't ask again), Windows' camera privacy settings on a PC, the site's settings in Chrome on Android, and the
+ * address bar's camera icon in a desktop browser.
  */
-export function inBinderApp(userAgent: string): boolean {
-  return userAgent.includes('Electron/')
-}
-
-/** Why the camera didn't start, and what to do about it where the page runs (`navigator.userAgent`). */
-export function describeCameraError(err: unknown, userAgent: string): string {
+export function describeCameraError(err: unknown, userAgent: string, platform: Platform = detectPlatform({ userAgent })): string {
   const name = err instanceof DOMException ? err.name : ''
+  const windowsSettings = 'Settings → Privacy & security → Camera'
   if (name === 'NotAllowedError') {
+    const refused = "Binder isn't allowed to use the camera."
+    if (platform === 'windows') {
+      return inBinderApp(userAgent)
+        ? `${refused} Turn on Camera access and Let desktop apps access your camera in ${windowsSettings}, then press Start it again.`
+        : `${refused} Allow it from the camera icon in the address bar, then press Start it again. If it's allowed there, turn on Let desktop apps access your camera in ${windowsSettings}.`
+    }
+    if (platform === 'android') return `${refused} Tap the icon left of the address, then Permissions → Camera to allow it, and tap Start it again.`
     return inBinderApp(userAgent)
-      ? "Binder isn't allowed to use the camera. Turn Binder on in System Settings → Privacy & Security → Camera, then quit and reopen Binder."
-      : "Binder isn't allowed to use the camera. Allow it from the camera icon in the address bar, then press Start it again."
+      ? `${refused} Turn Binder on in System Settings → Privacy & Security → Camera, then quit and reopen Binder.`
+      : `${refused} Allow it from the camera icon in the address bar, then press Start it again.`
   }
   if (name === 'NotFoundError' || name === 'OverconstrainedError') return 'No camera found.'
-  if (name === 'NotReadableError') return 'The camera is in use by another app.'
+  if (name === 'NotReadableError') {
+    // Windows can report a camera its privacy settings keep from desktop apps as one it can't read.
+    return platform === 'windows'
+      ? `The camera is in use by another app, or turned off for desktop apps in ${windowsSettings}.`
+      : 'The camera is in use by another app.'
+  }
   return `Couldn't start the camera: ${err instanceof Error ? err.message : String(err)}`
+}
+
+/**
+ * The help shown when the only cameras are the computer's own (facing the owner, not the scanning area), for where the
+ * page runs: on a Mac, how to use an iPhone (Continuity Camera); on a PC, a webcam over the mat or an Android phone;
+ * nothing on a phone, whose back camera is the one to use.
+ */
+export function cameraHelp(platform: Platform): { title: string; text: string } | null {
+  if (platform === 'mac') {
+    return {
+      title: 'Using your iPhone as the camera (Continuity Camera)',
+      text:
+        'Sign both devices into the same Apple ID with Wi-Fi and Bluetooth on. For USB, plug the iPhone in and trust this ' +
+        'Mac. Lock the iPhone, keep it still in landscape, and mount it over the scanning area; it then appears in the ' +
+        `camera list under your iPhone's name, like "My iPhone Camera".`,
+    }
+  }
+  if (platform === 'windows') {
+    return {
+      title: 'A camera over the scanning area, or your phone',
+      text:
+        'A USB webcam mounted over the mat, looking straight down, works well: it appears in the camera list once ' +
+        "it's plugged in. Or scan with an Android phone: turn on Settings → Phone access on this PC, then open Binder on " +
+        'the phone and take a photo of each card.',
+    }
+  }
+  return null
+}
+
+/** What to do in manual mode, said for a finger (`touch`) or for keys. */
+export function captureHint(touch: boolean): string {
+  return touch ? 'Place a card in the guide, then tap Capture.' : 'Place a card in the guide, then press Capture or Space.'
 }
 
 /** How late a beep may still play: a capture's beep held back longer (see beep) is left out. */
@@ -101,13 +154,29 @@ function beep(audio: { ctx: AudioContext | null }) {
   }
 }
 
+type OnCapture = (jpeg: Blob, auto: boolean, lifted: boolean) => void
+
 /**
- * The camera side of the Scan page (spec §5.1.1): camera picker (remembered), live preview with a card-shaped guide,
- * and capture by button, Space, or auto mode. Each capture is the guide region (plus a margin) as JPEG.
+ * The camera side of the Scan page (spec §5.1.1): the live camera where the browser allows one, else photos from the
+ * phone's camera app (PhotoPanel: a phone on plain HTTP). `summary`: the queue's, for the capture bar below lg.
  */
-export function CameraPanel({ onCapture }: { onCapture: (jpeg: Blob, auto: boolean, lifted: boolean) => void }) {
+export function CameraPanel({ onCapture, summary }: { onCapture: OnCapture; summary?: ReactNode }) {
+  if (!CAN_USE_LIVE_CAMERA) return <PhotoPanel onCapture={(jpeg) => onCapture(jpeg, false, false)} summary={summary} />
+  return <LiveCamera onCapture={onCapture} summary={summary} />
+}
+
+/**
+ * The live camera (spec §5.1.1): camera picker (remembered), live preview with a card-shaped guide, and capture by
+ * button, Space, or auto mode. Each capture is the guide region (plus a margin) as JPEG. On a phone, Take a photo too.
+ */
+function LiveCamera({ onCapture, summary }: { onCapture: OnCapture; summary?: ReactNode }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const audio = useRef<{ ctx: AudioContext | null }>({ ctx: null })
+  const coarse = useCoarsePointer()
+  /** A phone (or a tablet): its back camera is the one to scan with, and it's held, not mounted, unless set up so. */
+  const handheld = IS_ANDROID || coarse
+  const handheldRef = useRef(handheld)
+  handheldRef.current = handheld
   const [devices, setDevices] = useState<MediaDeviceInfo[] | null>(null)
   const [deviceId, setDeviceId] = useState(() => stored(CAMERA_KEY))
   /**
@@ -119,11 +188,13 @@ export function CameraPanel({ onCapture }: { onCapture: (jpeg: Blob, auto: boole
   const running = useRef<string | null>(null)
   const [size, setSize] = useState<{ width: number; height: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
-  /** The camera stopped sending pictures: `ended` for good (unplugged, or the iPhone moved away), or `paused` for now. */
+  /** The camera stopped sending pictures: `ended` for good (unplugged, or the phone moved away), or `paused` for now. */
   const [stopped, setStopped] = useState<'ended' | 'paused' | null>(null)
   /** Bumped by Start it again, to look for cameras and start the camera again after it ended or failed to start. */
   const [restarts, setRestarts] = useState(0)
-  const [mode, setMode] = useState<Mode>(() => (stored(MODE_KEY) === 'auto' ? 'auto' : 'manual'))
+  // A phone in the hand never holds still long enough for auto mode, so it starts in manual mode every time; auto mode
+  // is chosen for a phone mounted over the mat.
+  const [mode, setMode] = useState<Mode>(() => (stored(MODE_KEY) === 'auto' && !coarse ? 'auto' : 'manual'))
   const modeRef = useRef(mode)
   modeRef.current = mode
   const chooseMode = (m: Mode) => {
@@ -143,17 +214,24 @@ export function CameraPanel({ onCapture }: { onCapture: (jpeg: Blob, auto: boole
   const restart = () => setRestarts((n) => n + 1)
 
   // Device labels are only visible once the camera is allowed, so a look that finds cameras without labels asks for
-  // any camera first. A camera plugged in or out is listed again without opening one, and no camera at all is listed
-  // as none. Start it again looks again too (after the camera wasn't allowed, say).
+  // any camera first; a phone asks for its back camera, which is then the one used until the owner picks another (a
+  // phone lists its front camera first as often as not). A camera plugged in or out is listed again without opening
+  // one, and no camera at all is listed as none. Start it again looks again too (after the camera wasn't allowed, say).
   useEffect(() => {
+    // Never missing where CameraPanel shows the live camera; read once, so a browser that drops it can't throw here.
+    const media = navigator.mediaDevices as MediaDevices | undefined
+    if (!media) return
     let cancelled = false
-    const cameras = async () => (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput')
-    async function list() {
+    const cameras = async () => (await media.enumerateDevices()).filter((d) => d.kind === 'videoinput')
+    const list = async () => {
       try {
         let all = await cameras()
         if (all.length > 0 && !all.some((d) => d.label)) {
-          const probe = await navigator.mediaDevices.getUserMedia({ video: true })
+          const back = handheldRef.current
+          const probe = await media.getUserMedia({ video: back ? { facingMode: { ideal: 'environment' } } : true })
+          const backId = back ? probe.getVideoTracks()[0]?.getSettings().deviceId : undefined
           for (const track of probe.getTracks()) track.stop()
+          if (backId && !cancelled) setDeviceId((now) => now ?? backId)
           all = await cameras()
         }
         if (cancelled) return
@@ -166,25 +244,26 @@ export function CameraPanel({ onCapture }: { onCapture: (jpeg: Blob, auto: boole
         }
         setDevices(all)
       } catch (err) {
-        if (!cancelled) setError(describeCameraError(err, navigator.userAgent))
+        if (!cancelled) setError(describeCameraError(err, navigator.userAgent, PLATFORM))
       }
     }
     void list()
-    navigator.mediaDevices.addEventListener('devicechange', list)
+    media.addEventListener('devicechange', list)
     return () => {
       cancelled = true
-      navigator.mediaDevices.removeEventListener('devicechange', list)
+      media.removeEventListener('devicechange', list)
     }
   }, [restarts])
 
   // Runs the chosen camera. A camera that stopped and is listed again becomes the chosen one, which starts it here.
   useEffect(() => {
-    if (!chosen) return
+    const media = navigator.mediaDevices as MediaDevices | undefined
+    if (!chosen || !media) return
     const id = chosen.deviceId
     let stream: MediaStream | null = null
     let cancelled = false
     setSize(null)
-    navigator.mediaDevices
+    media
       .getUserMedia({ video: { deviceId: { exact: id }, width: { ideal: 1920 }, height: { ideal: 1440 } } })
       .then((s) => {
         if (cancelled) {
@@ -210,7 +289,7 @@ export function CameraPanel({ onCapture }: { onCapture: (jpeg: Blob, auto: boole
       })
       .catch((err: unknown) => {
         // A camera switched away from while it was starting isn't this one's problem.
-        if (!cancelled) setError(describeCameraError(err, navigator.userAgent))
+        if (!cancelled) setError(describeCameraError(err, navigator.userAgent, PLATFORM))
       })
     return () => {
       cancelled = true
@@ -317,10 +396,13 @@ export function CameraPanel({ onCapture }: { onCapture: (jpeg: Blob, auto: boole
     setSize((now) => (now?.width === width && now.height === height ? now : { width, height }))
   }
   const guide = size ? guideRect(size.width, size.height) : null
-  // Only the Mac's own cameras (or none): explain how to use the iPhone.
-  const noPhone = devices !== null && devices.every((d) => cameraRank(d.label) >= MAC_CAMERA_RANK)
+  // Only the computer's own cameras (or none): say how to get one over the scanning area. Not on a phone, whose back
+  // camera is the one.
+  const help =
+    !handheld && devices !== null && devices.every((d) => cameraRank(d.label) >= BUILT_IN_CAMERA_RANK) ? cameraHelp(PLATFORM) : null
   const button = (active: boolean) =>
-    `rounded-md px-3 py-1 text-sm ${active ? 'bg-stone-700 text-stone-50' : 'text-stone-400 hover:text-stone-100'}`
+    `rounded-md px-3 py-1 text-sm pointer-coarse:py-2.5 ${active ? 'bg-stone-700 text-stone-50' : 'text-stone-400 hover:text-stone-100'}`
+  const hint = mode === 'auto' ? AUTO_STATUS[autoStatus] : captureHint(coarse)
 
   return (
     <section aria-label="Camera" className="space-y-3">
@@ -336,7 +418,7 @@ export function CameraPanel({ onCapture }: { onCapture: (jpeg: Blob, auto: boole
             store(CAMERA_KEY, e.target.value)
           }}
           disabled={!devices || devices.length === 0}
-          className="min-w-0 flex-1 rounded-md border border-stone-700 bg-stone-900 px-2 py-1.5 text-sm text-stone-100"
+          className="min-w-0 flex-1 rounded-md border border-stone-700 bg-stone-900 px-2 py-1.5 text-sm text-stone-100 pointer-coarse:min-w-48 pointer-coarse:py-2.5"
         >
           {devices?.length === 0 && <option value="">No camera found</option>}
           {/* Selected while waiting, so picking any listed camera, the first one too, is a change. */}
@@ -356,15 +438,26 @@ export function CameraPanel({ onCapture }: { onCapture: (jpeg: Blob, auto: boole
               onClick={() => chooseMode(m)}
               className={button(mode === m)}
             >
-              {m === 'manual' ? 'Manual' : 'Auto'}
+              {/* Auto mode waits for the picture to hold still: a phone has to be mounted over the mat for it. */}
+              {m === 'manual' ? 'Manual' : coarse ? 'Auto (mounted)' : 'Auto'}
             </button>
           ))}
         </div>
+        {handheld && (
+          <TakePhotoButton
+            onCapture={(jpeg) => onCapture(jpeg, false, false)}
+            className="inline-flex min-h-10 items-center rounded-md border border-stone-700 px-3 text-sm text-stone-200 hover:bg-stone-800"
+          />
+        )}
       </div>
 
       <div
-        className="relative overflow-hidden rounded-xl border border-stone-800 bg-black"
-        style={{ aspectRatio: size ? `${size.width} / ${size.height}` : '4 / 3' }}
+        className="relative mx-auto overflow-hidden rounded-xl border border-stone-800 bg-black"
+        style={{
+          aspectRatio: size ? `${size.width} / ${size.height}` : '4 / 3',
+          // On a phone, at most half the screen tall, leaving room for the capture bar and what was read.
+          maxWidth: handheld && size ? `calc(50dvh * ${size.width / size.height})` : undefined,
+        }}
       >
         <video
           ref={videoRef}
@@ -372,7 +465,7 @@ export function CameraPanel({ onCapture }: { onCapture: (jpeg: Blob, auto: boole
           playsInline
           muted
           onLoadedMetadata={(e) => fit(e.currentTarget)}
-          // The picture's size changes when an iPhone is turned, for example.
+          // The picture's size changes when a phone is turned, for example.
           onResize={(e) => fit(e.currentTarget)}
           className="absolute inset-0 h-full w-full"
         />
@@ -391,18 +484,14 @@ export function CameraPanel({ onCapture }: { onCapture: (jpeg: Blob, auto: boole
         {flashes > 0 && <div key={flashes} aria-hidden className="pointer-events-none absolute inset-0 animate-flash bg-white" />}
       </div>
 
-      <div className="flex items-center gap-3">
-        <button
-          onClick={() => capture(false)}
-          disabled={!size || stopped !== null}
-          className="rounded-md bg-amber-500 px-4 py-2 text-sm font-medium text-stone-950 hover:bg-amber-400 disabled:opacity-50"
-        >
+      {/* Below lg the capture button is in a bar of its own, so what to do goes above it. */}
+      <p className="text-sm text-stone-400 lg:hidden">{hint}</p>
+      <CaptureBar summary={summary}>
+        <button onClick={() => capture(false)} disabled={!size || stopped !== null} className={CAPTURE_BUTTON}>
           Capture
         </button>
-        <p className="text-sm text-stone-400">
-          {mode === 'auto' ? AUTO_STATUS[autoStatus] : 'Place a card in the guide, then press Capture or Space.'}
-        </p>
-      </div>
+        <p className="hidden text-sm text-stone-400 lg:block">{hint}</p>
+      </CaptureBar>
 
       {error && (
         <p role="alert" className="rounded-lg border border-rose-900 bg-rose-950/40 p-3 text-sm text-rose-200">
@@ -420,7 +509,7 @@ export function CameraPanel({ onCapture }: { onCapture: (jpeg: Blob, auto: boole
       )}
       {stopped === 'ended' && (
         <p role="alert" className="rounded-lg border border-amber-900 bg-amber-950/40 p-3 text-sm text-amber-200">
-          The camera stopped: it may have been unplugged, or the iPhone moved away.{' '}
+          The camera stopped: it may have been unplugged, or the phone moved away.{' '}
           {waiting ? (
             `It starts again by itself once it's back${devices?.length ? ', or choose another camera above' : ''}.`
           ) : (
@@ -435,14 +524,10 @@ export function CameraPanel({ onCapture }: { onCapture: (jpeg: Blob, auto: boole
           The camera isn't sending pictures right now. It picks up again by itself.
         </p>
       )}
-      {noPhone && (
+      {help && (
         <div className="rounded-lg border border-stone-800 bg-stone-900/60 p-3 text-sm text-stone-400">
-          <p className="font-medium text-stone-300">Using your iPhone as the camera (Continuity Camera)</p>
-          <p className="mt-1">
-            Sign both devices into the same Apple ID with Wi-Fi and Bluetooth on. For USB, plug the iPhone in and trust
-            this Mac. Lock the iPhone, keep it still in landscape, and mount it over the scanning area; it then appears
-            in the camera list under your iPhone's name, like "My iPhone Camera".
-          </p>
+          <p className="font-medium text-stone-300">{help.title}</p>
+          <p className="mt-1">{help.text}</p>
         </div>
       )}
     </section>

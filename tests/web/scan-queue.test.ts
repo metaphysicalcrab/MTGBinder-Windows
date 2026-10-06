@@ -8,6 +8,8 @@ import {
   commitInChunks,
   commitToast,
   COMMIT_CHUNK_SIZE,
+  emptyQueueText,
+  queueCounts,
   scanPriceLabel,
   sentAllToast,
   skippedNote,
@@ -280,5 +282,24 @@ describe('sending every scan somewhere, and skipped captures', () => {
     expect(skippedNote(0)).toBeNull()
     expect(skippedNote(1)).toBe('Skipped 1 capture with no text in the last minute: the empty mat, or a card face down.')
     expect(skippedNote(4)).toMatch(/^Skipped 4 captures with no text/)
+  })
+})
+
+describe('the queue in a few words', () => {
+  it('counts what is ready, what to check, and what is still being read', () => {
+    const statuses: Array<ScanItem['status']> = ['confident', 'review', 'queued', 'identifying', 'confident', 'review', 'review', 'committed']
+    expect(queueCounts(statuses.map((status) => ({ status })))).toEqual({ ready: 2, toCheck: 3, reading: 2 })
+    expect(queueCounts([])).toEqual({ ready: 0, toCheck: 0, reading: 0 })
+  })
+
+  it('says how to capture: Space with keys, tap on a touch screen, and Take a photo without a live camera', () => {
+    expect(emptyQueueText(true, false)).toBe(
+      'Captured cards appear here. Place a card in the guide and press Capture or Space, or switch to Auto to capture each card as you set it down.',
+    )
+    expect(emptyQueueText(true, true)).toMatch(/tap Capture, or, with the phone mounted over the mat, switch to Auto/)
+    expect(emptyQueueText(false, true)).toBe('Captured cards appear here. Tap Take a photo of the card, then fit the guide to it.')
+    for (const text of [emptyQueueText(true, true), emptyQueueText(false, true), emptyQueueText(false, false)]) {
+      expect(text).not.toMatch(/Space/)
+    }
   })
 })

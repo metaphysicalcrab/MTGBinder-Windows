@@ -7,6 +7,7 @@ import {
   commitScans,
   dropBareMat,
   finishFor,
+  removeFinishedImages,
   requeueInterrupted,
   requeueScan,
   saveScanResult,
@@ -40,7 +41,7 @@ export interface ScanWorker {
   kick(): void
   /** Resolves once nothing is being identified. Scans queued without a kick() stay queued. */
   idle(): Promise<void>
-  /** Queues again the scans a restart interrupted, then starts. */
+  /** Queues again the scans a restart interrupted, deletes finished scans' images left behind, then starts. */
   recover(): void
 }
 
@@ -48,9 +49,9 @@ const candidateIds = (candidates: readonly ScoredCard[]) =>
   candidates.map((c) => ({ cardId: c.card.id, score: c.score }))
 
 /**
- * Identifies queued scans on this Mac (spec §5.1.2): OCR, then the matcher. A confident scan is ready (and, when it
- * was captured by hand, committed straight away if auto-commit is on); a certain card with an uncertain printing, and
- * anything the matcher can't settle, go to review. Scanning never calls a cloud service.
+ * Identifies queued scans on this computer (spec §5.1.2): OCR, then the matcher. A confident scan is ready (and, when
+ * it was captured by hand, committed straight away if auto-commit is on); a certain card with an uncertain printing,
+ * and anything the matcher can't settle, go to review. Scanning never calls a cloud service.
  */
 export function createScanWorker(deps: ScanWorkerDeps): ScanWorker {
   const { db, lookups } = deps
@@ -185,6 +186,7 @@ export function createScanWorker(deps: ScanWorkerDeps): ScanWorker {
     idle: () => (running === 0 ? Promise.resolve() : new Promise((resolve) => waiting.push(resolve))),
     recover() {
       requeueInterrupted(db)
+      removeFinishedImages(db, deps.scansDir)
       pump()
     },
   }

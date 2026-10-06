@@ -3,7 +3,8 @@ import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { z } from 'zod'
 import type { DB } from '../db/index.ts'
-import { ApiError, parseWith, PathId, pathId, readJson } from '../http.ts'
+import { ApiError, parseWith, PathId, pathId, rateLimited, readJson, type AppEnv } from '../http.ts'
+import { createRateLimiter } from '../lan/rate-limit.ts'
 import {
   addScan,
   commitScans,
@@ -61,23 +62,58 @@ const Commit = z
 
 const scanId = (value: string) => pathId(value, 'Scan not found')
 
+/** The scans waiting in the queue (not yet added or discarded) past which a phone's captures are refused. */
+export const MAX_WAITING_SCANS = 500
+/** …and the space their photos may take. */
+export const MAX_WAITING_BYTES = 2 * 1024 * 1024 * 1024
+
+/** Whether the queue is too full for a phone to add to: MAX_WAITING_SCANS scans, or MAX_WAITING_BYTES of photos. */
+function queueFull(db: DB, scansDir: string): boolean {
+  const waiting = db
+    .prepare("SELECT image_path FROM scan_items WHERE status IN ('queued', 'identifying', 'confident', 'review')")
+    .all() as Array<{ image_path: string | null }>
+  if (waiting.length >= MAX_WAITING_SCANS) return true
+  let bytes = 0
+  for (const row of waiting) {
+    const file = scanImageFile(scansDir, row)
+    if (file) bytes += fs.statSync(file, { throwIfNoEntry: false })?.size ?? 0
+  }
+  return bytes >= MAX_WAITING_BYTES
+}
+
 /** A JPEG starts with FF D8 FF. */
 const isJpeg = (bytes: Uint8Array) => bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
 
-/** /api/scan (spec §5.1): capture, the queue, edits, and commit. */
-export function scanRoutes(deps: { db: DB; scanner: ScanService }): Hono {
+/**
+ * /api/scan (spec §5.1): capture, the queue, edits, and commit. A phone (spec §5.10) may send at most 2 captures a
+ * second, and none while the queue is full, so a phone stuck capturing can't fill the PC's disk.
+ */
+export function scanRoutes(deps: { db: DB; scanner: ScanService }): Hono<AppEnv> {
   const { db, scanner } = deps
-  const routes = new Hono()
+  const routes = new Hono<AppEnv>()
+  const captures = createRateLimiter({ limit: 2, perMs: 1000 })
 
   routes.post(
     '/',
     bodyLimit({
       maxSize: MAX_SCAN_BYTES,
       onError: () => {
-        throw new ApiError(413, 'too_large', `A capture can be at most ${MAX_SCAN_BYTES / 1024 / 1024} MB`)
+        throw new ApiError(
+          413,
+          'too_large',
+          `A capture can be at most ${MAX_SCAN_BYTES / 1024 / 1024} MB; from a phone, take the photo again (Binder shrinks each photo before sending it)`,
+        )
       },
     }),
     async (c) => {
+      const client = c.get('client')
+      if (client?.kind === 'device') {
+        const wait = captures.take(String(client.id))
+        if (wait) throw rateLimited(wait, 'Too many captures at once from this phone')
+        if (queueFull(db, scanner.scansDir)) {
+          throw new ApiError(409, 'queue_full', 'The scan queue is full; review or add the scans on the PC first')
+        }
+      }
       const bytes = new Uint8Array(await c.req.arrayBuffer())
       if (!isJpeg(bytes)) throw new ApiError(400, 'bad_request', 'A capture must be a JPEG image')
       const query = parseWith(CaptureQuery, c.req.query())

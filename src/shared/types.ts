@@ -582,3 +582,110 @@ export type ChatEvent =
   /** The answer failed; with `canContinue`, Continue asks again. */
   | { type: 'error'; message: string; canContinue: boolean }
   | { type: 'done' }
+
+/** An address of this PC that a phone on the same network can open Binder at (spec §5.10). */
+export interface LanAddress {
+  address: string
+  /** The network adapter's name: "Wi-Fi", "Ethernet", "en0". */
+  interface: string
+  /**
+   * The one Binder uses when none is chosen: the first on a real adapter, Wi-Fi before Ethernet. Virtual adapters
+   * (Hyper-V, WSL, VirtualBox, Docker, VPNs) come last and are never recommended: a phone can't reach them.
+   */
+  recommended: boolean
+}
+
+/** A paired phone, as Settings → Phone access lists it. */
+export interface LanDevice {
+  id: number
+  name: string
+  createdAt: string
+  lastSeenAt: string | null
+  lastIp: string | null
+  /**
+   * Whether it paired over HTTPS. Its cookie works only the way it paired: one paired over HTTP must pair again while
+   * HTTPS is on, and one paired over HTTPS while it's off.
+   */
+  https: boolean
+}
+
+/** An open pairing window: the code to type on the phone, and the address its QR code holds. */
+export interface LanPairing {
+  /** 8 digits, shown as "4821 0937". */
+  code: string
+  /** `http://<address>:<port>/pair#k=<key>`: opening it pairs the phone without the code. */
+  url: string
+  expiresAt: string
+}
+
+/** Phone access (spec §5.10), as Settings on the PC shows it: GET and PUT /api/lan. */
+export interface LanStatus {
+  enabled: boolean
+  /** Phones use HTTPS (Settings turned it on), on `httpsPort`. */
+  https: boolean
+  /** The phones' port: 4322 unless BINDER_LAN_PORT moves it. */
+  port: number
+  /** The HTTPS port, the next one up. */
+  httpsPort: number
+  listening: boolean
+  /**
+   * Why phones can't connect: "Couldn't listen on port 4322: …". Or, while Binder listens on `port`, why they can't
+   * over HTTPS (its port, or its certificate), when HTTPS is on: they open `url`, over HTTP, meanwhile.
+   */
+  error: string | null
+  /** This PC's addresses on its networks, best first. */
+  addresses: LanAddress[]
+  /** The address chosen in Settings; null uses the recommended one. */
+  address: string | null
+  /**
+   * What the phone opens: https://… when HTTPS is on (and listening), else http://…; null when Binder isn't listening
+   * for phones, or this PC has no address to give.
+   */
+  url: string | null
+  /** `http://<address>:4322/phone-setup` when HTTPS is on, for installing the certificate. */
+  setupUrl: string | null
+  /**
+   * The SHA-256 fingerprint of Binder's certificate authority ("AB:CD:…") when HTTPS is on and the authority has been
+   * made, while phone access is off too (the one in the library's `lan/` folder, which phones installed); else null.
+   */
+  caFingerprint: string | null
+  /**
+   * Its name, which Android lists it by under Trusted credentials → User: "Binder on DESKTOP-ABC1 (2026-10-02)". Null
+   * when `caFingerprint` is.
+   */
+  caName: string | null
+  /**
+   * Binder made a new certificate authority while it ran (rotated, or the old one's files were missing, damaged or near
+   * their end): phones that installed the old one must remove it and install this one.
+   */
+  caReplaced: boolean
+  pairing: LanPairing | null
+  /**
+   * How the last pairing window ended, until another opens: the phone paired (with its name), the code expired, or
+   * there were too many wrong codes. Null while one is open, after one is cancelled, and when there was none.
+   */
+  pairingEnded: { reason: 'paired' | 'expired' | 'too_many_tries'; name: string | null } | null
+  devices: LanDevice[]
+  /** On Windows: the network's name, and whether Windows calls it Public (which blocks phones). */
+  network: { publicProfile: boolean; name: string } | null
+}
+
+/** Phone access as the terminal and the desktop app's tray show it: where phones open Binder, or why they can't. */
+export interface LanSummary {
+  enabled: boolean
+  /** False when BINDER_LAN=0 keeps phone access off for this Binder, so nothing turns it on (`error` says so). */
+  available: boolean
+  listening: boolean
+  /** The addresses phones open (the chosen one first), https://… when HTTPS is on, while Binder listens for them. */
+  urls: string[]
+  error: string | null
+}
+
+/**
+ * Who is asking (GET /api/lan/me): this PC, a paired phone, or a phone that isn't paired yet, and whether phones use
+ * HTTPS (it's on, and listening).
+ */
+export type LanClient =
+  | { client: 'pc' }
+  | { client: 'device'; id: number; name: string }
+  | { client: 'unpaired'; https: boolean }

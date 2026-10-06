@@ -1,7 +1,8 @@
 import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useReducer, useRef } from 'react'
 import type { ApiErrorBody, ChatEvent, ChatItem, ThreadDetail, ThreadSummary } from '../../shared/types.ts'
-import { apiGet, apiSend, ApiRequestError } from './api.ts'
+import { apiFetch, apiGet, apiSend, ApiRequestError } from './api.ts'
+import { apiSignal, reportApiError } from './client.ts'
 import { invalidateCollection } from './collection.ts'
 import { useToast } from './toast.tsx'
 
@@ -188,7 +189,7 @@ export const asSentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${
 
 /** POSTs to an answer route and passes each server-sent event on. An error before the stream opens throws. */
 async function streamAnswer(path: string, body: unknown, onEvent: (event: ChatEvent) => void, signal: AbortSignal): Promise<void> {
-  const res = await fetch(path, {
+  const res = await apiFetch(path, {
     method: 'POST',
     headers: body === undefined ? {} : { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -238,6 +239,13 @@ export function useAnswer(threadId: number) {
       controller.current = ctrl
       dispatch({ type: 'start', stored: queryClient.getQueryData<ThreadDetail>(['thread', threadId])?.items ?? [] })
       let madeDeck = false
+      // A phone that sleeps, or switches to another app, cuts the stream. That's no error to report: the server keeps
+      // what was said, and the conversation offers Continue when it shows again.
+      let hidden = document.hidden
+      const onVisibility = () => {
+        if (document.hidden) hidden = true
+      }
+      document.addEventListener('visibilitychange', onVisibility)
       try {
         await streamAnswer(
           path,
@@ -254,8 +262,12 @@ export function useAnswer(threadId: number) {
           ctrl.signal,
         )
       } catch (err) {
-        if (!ctrl.signal.aborted) toast.error(err instanceof Error ? err.message : String(err))
+        // A phone the PC forgot goes back to the pairing page, as from any other request (React Query's own go there).
+        if (apiSignal(err) === 'unpaired') return reportApiError(err)
+        const cutWhileHidden = hidden && !(err instanceof ApiRequestError)
+        if (!ctrl.signal.aborted && !cutWhileHidden) toast.error(err instanceof Error ? err.message : String(err))
       } finally {
+        document.removeEventListener('visibilitychange', onVisibility)
         if (madeDeck) invalidateCollection(queryClient, { keepScryfallSearches: true })
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ['thread', threadId] }),

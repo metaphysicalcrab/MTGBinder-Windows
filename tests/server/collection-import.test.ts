@@ -7,6 +7,7 @@ import type { DB } from '../../src/server/db/index.ts'
 import type { ImportRow } from '../../src/shared/types.ts'
 import { createTestDb } from '../helpers/db.ts'
 import { fixtureCard, syntheticCard } from '../helpers/fixtures.ts'
+import { QUICK_MS } from '../helpers/timing.ts'
 
 let db: DB
 beforeEach(() => {
@@ -88,8 +89,8 @@ describe('previewImport: columns', () => {
     ])
     expect([withoutVariant('Bolt (a) [b] (c)'), withoutVariant('Bolt (a (b))'), withoutVariant('(a) [b]')]).toEqual(['Bolt', 'Bolt (a (b))', null])
     const start = performance.now()
-    withoutVariant(`x${' '.repeat(40_000)})`)
-    expect(performance.now() - start).toBeLessThan(50)
+    withoutVariant(`x${' '.repeat(100_000)})`)
+    expect(performance.now() - start).toBeLessThan(QUICK_MS)
   })
 
   it('reads a misspelled name that ends in parentheses as that card, not as the card before the parentheses', () => {
@@ -154,7 +155,7 @@ describe('previewImport: columns', () => {
       ['ambiguous', id('Lightning Bolt', 'm11'), 'nonfoil', 1, 'No set given; picked its usual printing'],
       ['resolved', id('Lightning Bolt', 'm10'), 'nonfoil', 1, null],
     ])
-    expect(performance.now() - start).toBeLessThan(500)
+    expect(performance.now() - start).toBeLessThan(QUICK_MS)
   })
 
   it('says when Simple Name and Name name different cards, going by Simple Name', () => {

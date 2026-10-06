@@ -1,7 +1,8 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { DeckImportItem, DeckImportPreview, DeckImportRow } from '../../../shared/types.ts'
 import { apiGetText, apiSend } from '../../lib/api.ts'
+import { copyText } from '../../lib/clipboard.ts'
 import { BOARD_LABEL, useDeckChange } from '../../lib/decks.ts'
 import { plural } from '../../lib/format.ts'
 import { useToast } from '../../lib/toast.tsx'
@@ -17,6 +18,7 @@ export function ImportExportTab({ deckId }: { deckId: number }) {
 }
 
 const box = 'space-y-3 rounded-xl border border-stone-800 bg-stone-900/40 p-4'
+const radio = 'pointer-coarse:size-5'
 
 function ImportPanel({ deckId }: { deckId: number }) {
   const [text, setText] = useState('')
@@ -44,6 +46,9 @@ function ImportPanel({ deckId }: { deckId: number }) {
         aria-label="Decklist"
         rows={10}
         spellCheck={false}
+        autoCapitalize="none"
+        autoCorrect="off"
+        autoComplete="off"
         value={text}
         onChange={(e) => {
           setText(e.target.value)
@@ -55,7 +60,7 @@ function ImportPanel({ deckId }: { deckId: number }) {
       <button
         onClick={() => preview.mutate(text)}
         disabled={text.trim() === '' || preview.isPending}
-        className="rounded-md bg-amber-500 px-3 py-1.5 text-sm font-medium text-stone-950 hover:bg-amber-400 disabled:opacity-50"
+        className="rounded-md bg-amber-500 px-3 py-1.5 text-sm font-medium text-stone-950 hover:bg-amber-400 disabled:opacity-50 pointer-coarse:py-2.5"
       >
         {preview.isPending ? 'Reading…' : 'Preview'}
       </button>
@@ -83,11 +88,11 @@ function ImportPanel({ deckId }: { deckId: number }) {
           )}
           <fieldset className="flex flex-wrap gap-4 text-stone-300">
             <legend className="sr-only">How to import</legend>
-            <label className="flex items-center gap-2">
-              <input type="radio" name="import-mode" checked={!replace} onChange={() => setReplace(false)} /> Add to this deck
+            <label className="flex items-center gap-2 pointer-coarse:min-h-10">
+              <input type="radio" name="import-mode" checked={!replace} onChange={() => setReplace(false)} className={radio} /> Add to this deck
             </label>
-            <label className="flex items-center gap-2">
-              <input type="radio" name="import-mode" checked={replace} onChange={() => setReplace(true)} /> Replace this deck's cards
+            <label className="flex items-center gap-2 pointer-coarse:min-h-10">
+              <input type="radio" name="import-mode" checked={replace} onChange={() => setReplace(true)} className={radio} /> Replace this deck's cards
             </label>
           </fieldset>
           <button
@@ -104,7 +109,7 @@ function ImportPanel({ deckId }: { deckId: number }) {
               )
             }
             disabled={items.length === 0 || apply.isPending}
-            className="rounded-md bg-amber-500 px-3 py-1.5 font-medium text-stone-950 hover:bg-amber-400 disabled:opacity-50"
+            className="rounded-md bg-amber-500 px-3 py-1.5 font-medium text-stone-950 hover:bg-amber-400 disabled:opacity-50 pointer-coarse:py-2.5"
           >
             {apply.isPending ? 'Importing…' : `${replace ? 'Replace with' : 'Add'} ${plural(copies, 'card')}`}
           </button>
@@ -136,16 +141,19 @@ function ProblemRow({ row }: { row: DeckImportRow }) {
 function ExportPanel({ deckId }: { deckId: number }) {
   const [format, setFormat] = useState<'arena' | 'mtgo'>('arena')
   const toast = useToast()
+  const listRef = useRef<HTMLTextAreaElement>(null)
   const { data, error } = useQuery({
     queryKey: ['deck', deckId, 'export', format],
     queryFn: ({ signal }) => apiGetText(`/api/decks/${deckId}/export?format=${format}`, signal),
   })
   async function copy() {
     try {
-      await navigator.clipboard.writeText(data ?? '')
+      await copyText(data ?? '')
       toast.success('Copied the list to the clipboard.')
     } catch {
-      toast.error("Couldn't copy to the clipboard.")
+      // The list is selected, for the browser's own Copy (a long press on a phone).
+      listRef.current?.select()
+      toast.error("Couldn't copy to the clipboard. The list is selected: copy it from there.")
     }
   }
   return (
@@ -158,7 +166,7 @@ function ExportPanel({ deckId }: { deckId: number }) {
           aria-label="Export format"
           value={format}
           onChange={(e) => setFormat(e.target.value as 'arena' | 'mtgo')}
-          className="rounded-md border border-stone-700 bg-stone-900 px-2 py-1 text-sm text-stone-100"
+          className="rounded-md border border-stone-700 bg-stone-900 px-2 py-1 text-sm text-stone-100 pointer-coarse:py-2"
         >
           <option value="arena">Arena</option>
           <option value="mtgo">MTGO</option>
@@ -170,6 +178,7 @@ function ExportPanel({ deckId }: { deckId: number }) {
         </p>
       ) : (
         <textarea
+          ref={listRef}
           aria-label="Exported list"
           readOnly
           rows={10}
@@ -180,7 +189,7 @@ function ExportPanel({ deckId }: { deckId: number }) {
       <button
         onClick={() => void copy()}
         disabled={!data}
-        className="rounded-md border border-stone-700 px-3 py-1.5 text-sm text-stone-200 hover:bg-stone-800 disabled:opacity-50"
+        className="rounded-md border border-stone-700 px-3 py-1.5 text-sm text-stone-200 hover:bg-stone-800 disabled:opacity-50 pointer-coarse:py-2.5"
       >
         Copy
       </button>

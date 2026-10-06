@@ -1,7 +1,11 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import type { Finish } from '../../shared/types.ts'
+import { PhoneAccessSettings } from '../components/settings/PhoneAccessSettings.tsx'
+import { ApiKeyOnThePc, ThisPhoneSettings } from '../components/settings/PhoneSettings.tsx'
+import { checkbox, section, sectionHead } from '../components/settings/styles.ts'
 import { apiPost } from '../lib/api.ts'
+import { useOnPhone } from '../lib/client.ts'
 import { formatDate } from '../lib/format.ts'
 import {
   librarySizeText,
@@ -17,8 +21,14 @@ import {
 } from '../lib/settings.ts'
 import { isBulkRunning, useBulkStatus } from '../lib/use-bulk-status.ts'
 
+/**
+ * Settings (spec §5.6). On a paired phone (spec §5.10), what a phone may change: card data, the scanner, and the
+ * deckbuilder, with whether Brainstorm has a key and This phone; the PC's own sections aren't shown, and what they'd
+ * ask for is never asked.
+ */
 export function SettingsPage() {
   const queryClient = useQueryClient()
+  const phone = useOnPhone()
   const { data: status, error } = useBulkStatus()
   const refresh = useMutation({
     mutationFn: () => apiPost<{ started: boolean }>('/api/bulk/refresh'),
@@ -30,8 +40,8 @@ export function SettingsPage() {
     <div className="mx-auto max-w-3xl space-y-8">
       <h1 className="font-serif text-3xl font-semibold text-stone-50">Settings</h1>
 
-      <section className="rounded-xl border border-stone-800 bg-stone-900/40 p-6">
-        <div className="flex items-start justify-between gap-4">
+      <section className={section}>
+        <div className={sectionHead}>
           <div>
             <h2 className="text-lg font-semibold text-stone-100">Card data</h2>
             <p className="mt-1 text-sm text-stone-400">
@@ -42,7 +52,7 @@ export function SettingsPage() {
           <button
             onClick={() => refresh.mutate()}
             disabled={running || refresh.isPending}
-            className="shrink-0 rounded-md bg-amber-500 px-4 py-2 text-sm font-medium text-stone-950 hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-50"
+            className="shrink-0 rounded-md bg-amber-500 px-4 py-2 text-sm font-medium text-stone-950 hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-50 pointer-coarse:py-2.5"
           >
             {running ? 'Refreshing…' : 'Refresh now'}
           </button>
@@ -84,16 +94,20 @@ export function SettingsPage() {
         )}
       </section>
       <ScannerSettings />
-      <ApiKeySettings />
+      {phone ? <ApiKeyOnThePc /> : <ApiKeySettings />}
       <DeckbuilderSettings />
-      <BackupSettings />
-      <LibraryFileSettings running={running} />
+      {phone ? (
+        <ThisPhoneSettings />
+      ) : (
+        <>
+          <BackupSettings />
+          <LibraryFileSettings running={running} />
+          <PhoneAccessSettings />
+        </>
+      )}
     </div>
   )
 }
-
-const section = 'rounded-xl border border-stone-800 bg-stone-900/40 p-6'
-const checkbox = 'accent-amber-500'
 
 /** Spec §5.6 "Backups": when the last backup was made, Back up now, and the folder they're kept in. */
 function BackupSettings() {
@@ -101,7 +115,7 @@ function BackupSettings() {
   const backUp = useBackUpNow()
   return (
     <section className={section}>
-      <div className="flex items-start justify-between gap-4">
+      <div className={sectionHead}>
         <div>
           <h2 className="text-lg font-semibold text-stone-100">Backups</h2>
           <p className="mt-1 text-sm text-stone-400">
@@ -114,7 +128,7 @@ function BackupSettings() {
         <button
           onClick={() => backUp.mutate()}
           disabled={backUp.isPending}
-          className="shrink-0 rounded-md bg-amber-500 px-4 py-2 text-sm font-medium text-stone-950 hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-50"
+          className="shrink-0 rounded-md bg-amber-500 px-4 py-2 text-sm font-medium text-stone-950 hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-50 pointer-coarse:py-2.5"
         >
           {backUp.isPending ? 'Backing up…' : 'Back up now'}
         </button>
@@ -144,7 +158,7 @@ function LibraryFileSettings({ running }: { running: boolean }) {
   const worthIt = text?.worthIt === true
   return (
     <section className={section}>
-      <div className="flex items-start justify-between gap-4">
+      <div className={sectionHead}>
         <div>
           <h2 className="text-lg font-semibold text-stone-100">Library file</h2>
           <p className="mt-1 text-sm text-stone-400">
@@ -155,7 +169,7 @@ function LibraryFileSettings({ running }: { running: boolean }) {
         <button
           onClick={() => compact.mutate()}
           disabled={!worthIt || compact.isPending || running}
-          className="shrink-0 rounded-md border border-stone-700 px-4 py-2 text-sm font-medium text-stone-100 hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
+          className="shrink-0 rounded-md border border-stone-700 px-4 py-2 text-sm font-medium text-stone-100 hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50 pointer-coarse:py-2.5"
         >
           {compact.isPending ? 'Compacting…' : 'Compact the library'}
         </button>
@@ -184,7 +198,7 @@ function DeckbuilderSettings() {
       {error ? (
         <p className="mt-3 text-sm text-rose-300">Couldn't load settings: {error.message}</p>
       ) : (
-        <label className="mt-3 flex items-center gap-2 text-sm text-stone-300">
+        <label className="mt-3 flex items-center gap-2 text-sm text-stone-300 pointer-coarse:gap-3">
           <input
             type="checkbox"
             className={checkbox}
@@ -212,7 +226,7 @@ function ScannerSettings() {
         <p className="mt-3 text-sm text-rose-300">Couldn't load settings: {error.message}</p>
       ) : (
         <div className="mt-3 space-y-3 text-sm text-stone-300">
-          <label className="flex items-center gap-2">
+          <label className="flex items-center gap-2 pointer-coarse:gap-3">
             <input
               type="checkbox"
               className={checkbox}
@@ -223,7 +237,7 @@ function ScannerSettings() {
             Add manual captures to the collection as soon as they're identified confidently (auto mode's captures wait in
             the queue)
           </label>
-          <label className="flex items-center gap-2">
+          <label className="flex items-center gap-2 pointer-coarse:gap-3">
             <input
               type="checkbox"
               className={checkbox}
@@ -234,13 +248,13 @@ function ScannerSettings() {
             Accept a card whose printing is uncertain, with its likeliest printing (for old cards whose printing doesn't
             matter)
           </label>
-          <label className="flex items-center gap-2">
+          <label className="flex flex-wrap items-center gap-2 pointer-coarse:gap-3">
             Scans start as
             <select
               value={settings?.scanDefaultFinish ?? 'nonfoil'}
               disabled={disabled}
               onChange={(e) => update.mutate({ scanDefaultFinish: e.target.value as Finish })}
-              className="rounded-md border border-stone-700 bg-stone-900 px-2 py-1 text-stone-100"
+              className="rounded-md border border-stone-700 bg-stone-900 px-2 py-1 text-stone-100 pointer-coarse:py-2"
             >
               <option value="nonfoil">Nonfoil</option>
               <option value="foil">Foil</option>
@@ -307,6 +321,11 @@ function ApiKeySettings() {
           data-1p-ignore
           data-lpignore="true"
           data-form-type="other"
+          // A key typed or pasted on a phone goes in as it is: no capitals or corrections.
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          enterKeyHint="done"
           placeholder={status?.configured ? 'Paste a new key to replace it' : 'sk-ant-…'}
           value={key}
           onChange={(e) => {
@@ -318,16 +337,16 @@ function ApiKeySettings() {
             e.preventDefault()
             saveTyped()
           }}
-          className="min-w-0 flex-1 rounded-md border border-stone-700 bg-stone-900 px-3 py-1.5 font-mono text-sm text-stone-100 outline-none focus:border-amber-500/70"
+          className="min-w-0 flex-1 basis-full rounded-md border border-stone-700 bg-stone-900 px-3 py-1.5 font-mono text-sm text-stone-100 outline-none focus:border-amber-500/70 sm:basis-0 pointer-coarse:py-2.5"
         />
-        <button type="button" onClick={saveTyped} disabled={!typed || save.isPending} className="rounded-md bg-amber-500 px-3 py-1.5 text-sm font-medium text-stone-950 hover:bg-amber-400 disabled:opacity-50">
+        <button type="button" onClick={saveTyped} disabled={!typed || save.isPending} className="rounded-md bg-amber-500 px-3 py-1.5 text-sm font-medium text-stone-950 hover:bg-amber-400 disabled:opacity-50 pointer-coarse:py-2.5">
           Save
         </button>
         <button
           type="button"
           disabled={(!typed && !status?.configured) || test.isPending}
           onClick={() => test.mutate(typed || undefined)}
-          className="rounded-md border border-stone-700 px-3 py-1.5 text-sm text-stone-200 hover:bg-stone-800 disabled:opacity-50"
+          className="rounded-md border border-stone-700 px-3 py-1.5 text-sm text-stone-200 hover:bg-stone-800 disabled:opacity-50 pointer-coarse:py-2.5"
         >
           {test.isPending ? 'Testing…' : 'Test'}
         </button>
@@ -336,7 +355,7 @@ function ApiKeySettings() {
             type="button"
             disabled={save.isPending}
             onClick={() => setConfirmingRemove(true)}
-            className="rounded-md border border-rose-900 px-3 py-1.5 text-sm text-rose-300 hover:bg-rose-950 disabled:opacity-50"
+            className="rounded-md border border-rose-900 px-3 py-1.5 text-sm text-rose-300 hover:bg-rose-950 disabled:opacity-50 pointer-coarse:py-2.5"
           >
             Remove
           </button>
@@ -349,14 +368,14 @@ function ApiKeySettings() {
             type="button"
             disabled={save.isPending}
             onClick={remove}
-            className="rounded-md bg-rose-700 px-2 py-1 text-rose-50 hover:bg-rose-600 disabled:opacity-50"
+            className="rounded-md bg-rose-700 px-2 py-1 text-rose-50 hover:bg-rose-600 disabled:opacity-50 pointer-coarse:px-3 pointer-coarse:py-2"
           >
             Remove
           </button>
           <button
             type="button"
             onClick={() => setConfirmingRemove(false)}
-            className="rounded-md border border-stone-700 px-2 py-1 text-stone-300 hover:bg-stone-800"
+            className="rounded-md border border-stone-700 px-2 py-1 text-stone-300 hover:bg-stone-800 pointer-coarse:px-3 pointer-coarse:py-2"
           >
             Keep it
           </button>

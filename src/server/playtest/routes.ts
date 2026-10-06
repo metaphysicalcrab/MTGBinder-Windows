@@ -10,7 +10,7 @@ import { AppendBody, StartBody, TokenQuery, UndoQuery } from './schema.ts'
 import { snapshotDeck, tokenDataOf } from './snapshot.ts'
 
 const NO_GAME = 'No game in progress'
-const CHANGED = 'The game changed in another window'
+const CHANGED = 'The game changed in another window or on another device'
 
 /**
  * The playtest's game (spec §5.9.1): start one, read it, save each action in order, take the last one back, end it.

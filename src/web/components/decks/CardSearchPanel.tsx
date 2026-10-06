@@ -42,7 +42,8 @@ export function CardSearchPanel({ deckId }: { deckId: number }) {
     add.mutate({ deckId, cardId, board, delta: 1 }, { onSuccess: ({ quantity }) => toast.success(`${name}: ${quantity} in ${BOARD_LABEL[board]}.`) })
   }
 
-  const toggle = (active: boolean) => `flex-1 rounded-md px-2 py-1 text-xs ${active ? 'bg-amber-500 font-medium text-stone-950' : 'text-stone-400 hover:text-stone-100'}`
+  const toggle = (active: boolean) =>
+    `flex-1 rounded-md px-2 py-1 text-xs pointer-coarse:py-2 pointer-coarse:text-sm ${active ? 'bg-amber-500 font-medium text-stone-950' : 'text-stone-400 hover:text-stone-100'}`
   const showSuggestions = open && typed.length >= 2 && typed !== submitted && (suggestions.data?.length ?? 0) > 0
 
   return (
@@ -80,7 +81,14 @@ export function CardSearchPanel({ deckId }: { deckId: number }) {
             }
           }}
           placeholder={scope === 'all' ? 'Name or Scryfall query…' : 'Search my library…'}
-          className="h-9 w-full rounded-lg border border-stone-700 bg-stone-900/80 px-3 text-sm text-stone-100 placeholder:text-stone-500 focus:border-amber-500/70 focus:outline-none"
+          // Card names and Scryfall syntax: no capitals, corrections or suggestions from a phone's keyboard.
+          inputMode="search"
+          autoCapitalize="none"
+          autoCorrect="off"
+          autoComplete="off"
+          spellCheck={false}
+          enterKeyHint="search"
+          className="h-9 w-full rounded-lg border border-stone-700 bg-stone-900/80 px-3 text-sm text-stone-100 placeholder:text-stone-500 focus:border-amber-500/70 focus:outline-none pointer-coarse:h-11"
         />
         {showSuggestions && (
           <ul className="absolute z-30 mt-1 w-full overflow-hidden rounded-lg border border-stone-700 bg-stone-900 shadow-2xl shadow-black/50">
@@ -91,7 +99,7 @@ export function CardSearchPanel({ deckId }: { deckId: number }) {
                   // Keeps focus in the search box, so the list doesn't close before the click lands.
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => addCard(card.cardId, card.name)}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-stone-200 hover:bg-stone-800"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-stone-200 hover:bg-stone-800 pointer-coarse:py-3"
                 >
                   <span className="min-w-0 flex-1 truncate">{card.name}</span>
                   <ManaText text={card.manaCost} className="shrink-0 text-xs" />
@@ -102,9 +110,13 @@ export function CardSearchPanel({ deckId }: { deckId: number }) {
           </ul>
         )}
       </form>
-      <label className="flex items-center gap-2 text-xs text-stone-400">
+      <label className="flex items-center gap-2 text-xs text-stone-400 pointer-coarse:text-sm">
         Add to
-        <select value={board} onChange={(e) => setBoard(e.target.value as Board)} className="rounded-md border border-stone-700 bg-stone-900 px-2 py-1 text-xs text-stone-100">
+        <select
+          value={board}
+          onChange={(e) => setBoard(e.target.value as Board)}
+          className="rounded-md border border-stone-700 bg-stone-900 px-2 py-1 text-xs text-stone-100 pointer-coarse:py-2 pointer-coarse:text-sm"
+        >
           {BOARD_ORDER.map((b) => (
             <option key={b} value={b}>
               {BOARD_LABEL[b]}
@@ -117,7 +129,8 @@ export function CardSearchPanel({ deckId }: { deckId: number }) {
           {results.error.message}
         </p>
       ) : results.data ? (
-        <ul className="max-h-[60vh] divide-y divide-stone-800/60 overflow-y-auto rounded-lg border border-stone-800">
+        // Its own scroller beside the deck from lg up; below it, the pane is the page, which scrolls on its own.
+        <ul className="divide-y divide-stone-800/60 rounded-lg border border-stone-800 lg:max-h-[60vh] lg:overflow-y-auto lg:overscroll-contain">
           {results.data.cards.length === 0 && <li className="px-3 py-2 text-xs text-stone-500">No cards match.</li>}
           {results.data.cards.map((card) => (
             <li key={`${card.cardId}-${card.finish ?? ''}`} className="flex items-start gap-2 px-3 py-2">
@@ -131,7 +144,7 @@ export function CardSearchPanel({ deckId }: { deckId: number }) {
               <button
                 aria-label={`Add ${card.name}`}
                 onClick={() => addCard(card.cardId, card.name)}
-                className="shrink-0 rounded-md border border-stone-700 px-2 text-amber-300 hover:bg-stone-800"
+                className="shrink-0 rounded-md border border-stone-700 px-2 text-amber-300 hover:bg-stone-800 pointer-coarse:size-10 pointer-coarse:px-0 pointer-coarse:text-lg"
               >
                 +
               </button>
